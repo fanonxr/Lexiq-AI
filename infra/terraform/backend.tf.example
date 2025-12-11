@@ -1,0 +1,21 @@
+# Terraform Backend Configuration Example
+# Copy this file to backend.tf and update with your storage account details
+# DO NOT commit backend.tf with actual values to version control
+
+terraform {
+  backend "azurerm" {
+    # Storage Account for Terraform state
+    resource_group_name  = "lexiqai-tfstate-rg"
+    storage_account_name = "lexiqaitfstatedev"  # Must be globally unique, lowercase, alphanumeric
+    container_name       = "terraform-state"
+    key                  = "dev/terraform.tfstate"  # Separate keys per environment
+
+    # Optional: Enable state locking
+    # State locking is automatically enabled with Azure Storage backend
+  }
+}
+
+# Note: Before using this backend, you need to:
+# 1. Create the storage account (see docs/foundation/terraform-state-setup.md)
+# 2. Update the values above with your storage account details
+# 3. Run: terraform init -migrate-state
