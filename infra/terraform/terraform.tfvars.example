@@ -1,0 +1,51 @@
+# Example Terraform variable values
+# Copy this file to dev.tfvars, staging.tfvars, or prod.tfvars
+# DO NOT commit actual .tfvars files with secrets to version control
+
+# Project Configuration
+project_name = "lexiqai"
+environment  = "dev" # Options: dev, staging, prod
+azure_location = "eastus"
+
+# Azure Configuration
+# These can also be set via environment variables or Azure CLI
+subscription_id = "<your-subscription-id>"
+tenant_id       = "<your-tenant-id>"
+
+# Network Configuration
+vnet_address_space           = ["10.0.0.0/16"]
+compute_subnet_cidr          = "10.0.1.0/24"
+data_subnet_cidr             = "10.0.2.0/24"
+private_endpoint_subnet_cidr = "10.0.3.0/24"
+
+# Database Configuration
+postgres_admin_username      = "lexiqai_admin"
+postgres_sku_name            = "B_Standard_B1ms" # For dev/staging
+# postgres_sku_name          = "GP_Standard_D2s_v3" # For prod
+postgres_storage_mb          = 32768 # 32 GB
+postgres_backup_retention_days = 7 # For dev/staging
+# postgres_backup_retention_days = 35 # For prod
+postgres_version             = "16"
+# Note: Workload type is determined by SKU:
+# - B_Standard_* (Burstable) = DevTest workload (use for dev/staging)
+# - GP_Standard_* (General Purpose) = GeneralPurpose workload (use for production)
+
+# Redis Configuration
+redis_sku_name = "Basic" # For dev
+# redis_sku_name = "Standard" # For prod
+redis_family   = "C"
+redis_capacity = 0 # C0 for dev
+# redis_capacity = 1 # C1 for prod
+redis_version  = "7.0"
+
+# Entra ID Configuration (for future use)
+# entra_tenant_domain = "lexiqai.onmicrosoft.com"
+# entra_app_client_id = "<client-id>"
+
+# Common Tags
+common_tags = {
+  Project     = "LexiqAI"
+  ManagedBy   = "Terraform"
+  CostCenter  = "Engineering"
+}
+

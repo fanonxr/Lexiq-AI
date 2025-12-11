@@ -1,0 +1,29 @@
+# Docker Compose Override Example
+# Copy this file to docker-compose.override.yml and customize for your local development
+# docker-compose.override.yml is automatically loaded by Docker Compose and is git-ignored
+
+services:
+  postgres:
+    # Override environment variables for local development
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: my_database
+    # Uncomment to expose additional ports or mount volumes
+    # ports:
+    #   - "5433:5432"  # Use different host port
+    # volumes:
+    #   - ./local-data/postgres:/var/lib/postgresql/data
+
+  redis:
+    # Override Redis password (empty by default)
+    command: redis-server --appendonly yes --requirepass myredispassword
+    # Or disable persistence for faster restarts
+    # command: redis-server
+
+  qdrant:
+    # Override Qdrant configuration
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      # QDRANT__LOG_LEVEL: DEBUG  # Enable debug logging
+
