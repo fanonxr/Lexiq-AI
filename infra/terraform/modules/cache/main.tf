@@ -1,14 +1,14 @@
 # Azure Cache for Redis
 resource "azurerm_redis_cache" "main" {
-  name                = "${var.project_name}-redis-${var.environment}"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  capacity            = var.capacity
-  family              = var.family
-  sku_name            = var.sku_name  # Just "Basic", "Standard", or "Premium"
-  non_ssl_port_enabled = var.enable_non_ssl_port  # Updated from deprecated enable_non_ssl_port
-  minimum_tls_version = "1.2"
-  redis_version       = var.redis_version
+  name                 = "${var.project_name}-redis-${var.environment}"
+  location             = var.location
+  resource_group_name  = var.resource_group_name
+  capacity             = var.capacity
+  family               = var.family
+  sku_name             = var.sku_name            # Just "Basic", "Standard", or "Premium"
+  non_ssl_port_enabled = var.enable_non_ssl_port # Updated from deprecated enable_non_ssl_port
+  minimum_tls_version  = "1.2"
+  redis_version        = var.redis_version
 
   # Note: Basic/Standard SKUs don't support VNet injection (subnet_id)
   # They use private endpoints instead (configured separately)
@@ -20,8 +20,8 @@ resource "azurerm_redis_cache" "main" {
   dynamic "redis_configuration" {
     for_each = var.rdb_backup_enabled ? [1] : []
     content {
-      rdb_backup_enabled          = var.rdb_backup_enabled
-      rdb_backup_frequency        = var.rdb_backup_frequency
+      rdb_backup_enabled            = var.rdb_backup_enabled
+      rdb_backup_frequency          = var.rdb_backup_frequency
       rdb_backup_max_snapshot_count = var.rdb_backup_max_snapshot_count
       rdb_storage_connection_string = var.rdb_storage_connection_string
     }
