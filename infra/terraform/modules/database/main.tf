@@ -1,14 +1,14 @@
 # PostgreSQL Flexible Server
 resource "azurerm_postgresql_flexible_server" "main" {
-  name                   = "${var.project_name}-db-${var.environment}"
-  resource_group_name    = var.resource_group_name
-  location               = var.location
-  version                = var.postgres_version
-  delegated_subnet_id    = var.data_subnet_id
-  private_dns_zone_id    = azurerm_private_dns_zone.postgres.id
+  name                          = "${var.project_name}-db-${var.environment}"
+  resource_group_name           = var.resource_group_name
+  location                      = var.location
+  version                       = var.postgres_version
+  delegated_subnet_id           = var.data_subnet_id
+  private_dns_zone_id           = azurerm_private_dns_zone.postgres.id
   public_network_access_enabled = false # Required when using VNet integration
-  administrator_login    = var.admin_username
-  administrator_password = var.admin_password
+  administrator_login           = var.admin_username
+  administrator_password        = var.admin_password
 
   # SKU Configuration
   # Note: Workload type is determined by SKU:
@@ -40,7 +40,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   # Authentication
   authentication {
     active_directory_auth_enabled = false # Will be enabled later with Managed Identity
-    password_auth_enabled          = true
+    password_auth_enabled         = true
   }
 
   tags = merge(
@@ -52,7 +52,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
 
   depends_on = [
     azurerm_private_dns_zone.postgres,
-    var.data_subnet_id,  # Ensure subnet exists before creating server
+    var.data_subnet_id, # Ensure subnet exists before creating server
   ]
 }
 

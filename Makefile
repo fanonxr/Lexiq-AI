@@ -4,7 +4,7 @@ ifneq (,$(wildcard .env.local))
     export
 endif
 
-.PHONY: help docker-up docker-down docker-logs docker-clean install test format lint terraform-init terraform-plan terraform-apply terraform-destroy
+.PHONY: help docker-up docker-down docker-logs docker-clean install test format lint terraform-init terraform-plan terraform-apply terraform-destroy frontend-dev frontend-build frontend-start frontend-install
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -48,6 +48,19 @@ docker-health: ## Check health status of all services
 install: ## Install dependencies for all services
 	cd apps/web-frontend && npm install
 	@echo "Install Python dependencies manually: pip install -r requirements.txt"
+
+# Frontend commands
+frontend-install: ## Install frontend dependencies
+	cd apps/web-frontend && npm install
+
+frontend-dev: ## Start frontend development server
+	cd apps/web-frontend && npm run dev
+
+frontend-build: ## Build frontend for production
+	cd apps/web-frontend && npm run build
+
+frontend-start: ## Start frontend production server
+	cd apps/web-frontend && npm run start
 
 # Testing
 test: ## Run tests (placeholder)
