@@ -67,6 +67,41 @@ services:
     networks:
       - lexiqai-network
 
+  # API Core Service (Python FastAPI)
+  # Authentication, user management, billing, and dashboard APIs
+  api-core:
+    build:
+      context: .
+      dockerfile: docker/api-core/Dockerfile
+    container_name: lexiqai-api-core-local
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/api-core/src:/app/src:ro  # Read-only for production-like behavior
+    environment:
+      - APP_NAME=api-core
+      - APP_ENV=development
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-lexiqai_local}
+      - REDIS_URL=redis://redis:6379/0
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+      - PYTHONPATH=/app/src
+    command: uvicorn api_core.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    networks:
+      - lexiqai-network
+
 volumes:
   postgres_data:
     driver: local

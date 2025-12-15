@@ -35,7 +35,7 @@ import {
 } from "@/lib/auth/msalConfig";
 import { AuthContext } from "@/contexts/AuthContext";
 import type { AuthContextValue, UserProfile } from "@/types/auth";
-import { removeAuthToken, getAuthToken } from "@/lib/api/client";
+import { removeAllTokens, getAuthToken } from "@/lib/api/client";
 import {
   loginWithEmailPassword,
   signupWithEmailPassword,
@@ -446,8 +446,8 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         await instance.logoutPopup(logoutConfig);
       }
       
-      // Remove email auth token
-      removeAuthToken();
+      // Remove all auth tokens (access and refresh)
+      removeAllTokens();
       
       // Clear user state
       setUser(null);
