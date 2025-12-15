@@ -58,6 +58,42 @@ export function removeAuthToken(): void {
 }
 
 /**
+ * Get refresh token from storage
+ */
+export function getRefreshToken(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return sessionStorage.getItem("refresh_token");
+}
+
+/**
+ * Set refresh token in storage
+ */
+export function setRefreshToken(token: string): void {
+  if (typeof window !== "undefined") {
+    sessionStorage.setItem("refresh_token", token);
+  }
+}
+
+/**
+ * Remove refresh token from storage
+ */
+export function removeRefreshToken(): void {
+  if (typeof window !== "undefined") {
+    sessionStorage.removeItem("refresh_token");
+  }
+}
+
+/**
+ * Remove all authentication tokens (access and refresh)
+ */
+export function removeAllTokens(): void {
+  removeAuthToken();
+  removeRefreshToken();
+}
+
+/**
  * API Request Options
  */
 export interface ApiRequestOptions extends RequestInit {
