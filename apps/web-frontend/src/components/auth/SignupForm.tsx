@@ -172,8 +172,8 @@ export function SignupForm() {
   }
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <h2 className="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+    <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900 p-6 sm:p-8">
+      <h2 className="mb-6 text-2xl font-semibold text-white">
         Create Account
       </h2>
 
@@ -183,11 +183,11 @@ export function SignupForm() {
       </div>
 
       {/* Microsoft Sign-Up Button (Primary) */}
-      <div className="mb-6">
+      <div className="mb-6 w-full min-w-0">
         <Button
           type="button"
           onClick={handleMicrosoftSignup}
-          className="w-full"
+          className="w-full bg-white text-zinc-900 hover:bg-zinc-100"
           size="lg"
           disabled={isSubmitting}
         >
@@ -208,12 +208,12 @@ export function SignupForm() {
 
       {/* Google Sign-Up Button (if enabled) */}
       {env.features.enableGoogleSignIn && (
-        <div className="mb-6">
+        <div className="mb-6 w-full min-w-0">
           <Button
             type="button"
             variant="outline"
             onClick={handleGoogleSignup}
-            className="w-full"
+            className="w-full bg-white text-zinc-900 border-zinc-300 hover:bg-zinc-100"
             size="lg"
             disabled={isSubmitting}
           >
@@ -231,17 +231,17 @@ export function SignupForm() {
       {/* Divider for email/password form */}
       <div className="relative my-6">
         <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-zinc-300 dark:border-zinc-700" />
+          <div className="w-full border-t border-zinc-700" />
         </div>
         <div className="relative flex justify-center text-sm">
-          <span className="bg-white px-2 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+          <span className="bg-zinc-900 px-2 text-white/60">
             Or sign up with email
           </span>
         </div>
       </div>
 
       {/* Registration Form */}
-      <form onSubmit={handleEmailPasswordSubmit} className="space-y-4">
+      <form onSubmit={handleEmailPasswordSubmit} className="space-y-4 w-full min-w-0">
             <FormInput
               name="name"
               type="text"
@@ -292,19 +292,19 @@ export function SignupForm() {
             />
 
             {/* Terms and Privacy Checkboxes */}
-            <div className="space-y-3 pt-2">
-              <label className="flex items-start space-x-3 cursor-pointer">
+            <div className="space-y-3 pt-2 w-full min-w-0">
+              <label className="flex items-start space-x-3 cursor-pointer min-w-0">
                 <input
                   type="checkbox"
                   checked={acceptedTerms}
                   onChange={() => handleCheckboxChange("terms")}
-                  className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800"
+                  className="mt-1 h-4 w-4 flex-shrink-0 rounded border-zinc-700 bg-zinc-800 text-white focus:ring-zinc-500 focus:ring-offset-zinc-900"
                 />
-                <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                <span className="text-sm text-white/80 min-w-0">
                   I agree to the{" "}
                   <Link
                     href="/terms"
-                    className="font-medium text-zinc-900 hover:underline dark:text-zinc-100"
+                    className="font-medium text-white hover:underline"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -313,18 +313,18 @@ export function SignupForm() {
                 </span>
               </label>
 
-              <label className="flex items-start space-x-3 cursor-pointer">
+              <label className="flex items-start space-x-3 cursor-pointer min-w-0">
                 <input
                   type="checkbox"
                   checked={acceptedPrivacy}
                   onChange={() => handleCheckboxChange("privacy")}
-                  className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800"
+                  className="mt-1 h-4 w-4 flex-shrink-0 rounded border-zinc-700 bg-zinc-800 text-white focus:ring-zinc-500 focus:ring-offset-zinc-900"
                 />
-                <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                <span className="text-sm text-white/80 min-w-0">
                   I agree to the{" "}
                   <Link
                     href="/privacy"
-                    className="font-medium text-zinc-900 hover:underline dark:text-zinc-100"
+                    className="font-medium text-white hover:underline"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -338,7 +338,7 @@ export function SignupForm() {
               type="submit"
               isLoading={isSubmitting}
               loadingText="Creating account..."
-              className="w-full"
+              className="w-full bg-white text-zinc-900 hover:bg-zinc-100"
               size="lg"
               disabled={!acceptedTerms || !acceptedPrivacy}
             >
@@ -347,19 +347,19 @@ export function SignupForm() {
           </form>
 
       {/* Email Verification Notice */}
-      <div className="mt-4 rounded-md bg-blue-50 p-3 dark:bg-blue-900/20">
-          <p className="text-sm text-blue-800 dark:text-blue-200">
+      <div className="mt-4 rounded-md bg-blue-900/20 p-3">
+          <p className="text-sm text-blue-200">
             <strong>Note:</strong> After creating your account, you'll receive an email verification link. Please check your inbox to verify your email address.
           </p>
         </div>
 
       {/* Sign In Link */}
       <div className="mt-6 text-center">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-white/70">
           Already have an account?{" "}
           <Link
             href="/login"
-            className="font-medium text-zinc-900 hover:underline dark:text-zinc-100"
+            className="font-medium text-white hover:underline"
           >
             Sign in
           </Link>

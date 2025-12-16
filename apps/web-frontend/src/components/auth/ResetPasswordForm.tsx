@@ -75,24 +75,24 @@ export function ResetPasswordForm() {
   // If success, show success message
   if (isSuccess) {
     return (
-      <div className="rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900 p-6 sm:p-8">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
-            <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-900/20">
+            <CheckCircle2 className="h-6 w-6 text-green-400" />
           </div>
-          <h2 className="mb-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+          <h2 className="mb-2 text-2xl font-semibold text-white">
             Check your email
           </h2>
-          <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
-            We've sent a password reset link to <strong>{email}</strong>. Please check your inbox and follow the instructions to reset your password.
+          <p className="mb-6 text-sm text-white/80">
+            We've sent a password reset link to <strong className="text-white">{email}</strong>. Please check your inbox and follow the instructions to reset your password.
           </p>
-          <p className="mb-6 text-xs text-zinc-500 dark:text-zinc-500">
+          <p className="mb-6 text-xs text-white/60">
             Didn't receive the email? Check your spam folder or try again.
           </p>
           <div className="space-y-3">
             <Link
               href="/login"
-              className="block w-full rounded-md bg-zinc-900 px-4 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-100"
+              className="block w-full rounded-md bg-white px-4 py-2 text-center text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-100"
             >
               Back to Sign In
             </Link>
@@ -102,7 +102,7 @@ export function ResetPasswordForm() {
                 setIsSuccess(false);
                 setEmail("");
               }}
-              className="block w-full rounded-md border border-zinc-300 bg-white px-4 py-2 text-center text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              className="block w-full rounded-md border border-zinc-700 bg-zinc-800 px-4 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-zinc-700"
             >
               Try a different email
             </button>
@@ -113,11 +113,11 @@ export function ResetPasswordForm() {
   }
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <h2 className="mb-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+    <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900 p-6 sm:p-8">
+      <h2 className="mb-2 text-2xl font-semibold text-white">
         Reset Password
       </h2>
-      <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="mb-6 text-sm text-white/80">
         Enter your email address and we'll send you a link to reset your password.
       </p>
 
@@ -127,7 +127,7 @@ export function ResetPasswordForm() {
       </div>
 
       {/* Reset Password Form */}
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 w-full min-w-0">
         <FormInput
           name="email"
           type="email"
@@ -145,7 +145,7 @@ export function ResetPasswordForm() {
           type="submit"
           isLoading={isSubmitting}
           loadingText="Sending reset link..."
-          className="w-full"
+          className="w-full bg-white text-zinc-900 hover:bg-zinc-100"
           size="lg"
         >
           Send Reset Link
@@ -156,15 +156,15 @@ export function ResetPasswordForm() {
       <div className="mt-6 text-center">
         <Link
           href="/login"
-          className="text-sm font-medium text-zinc-900 hover:underline dark:text-zinc-100"
+          className="text-sm font-medium text-white hover:underline"
         >
           ← Back to Sign In
         </Link>
       </div>
 
       {/* Microsoft Entra ID Note */}
-      <div className="mt-6 rounded-md bg-blue-50 p-3 dark:bg-blue-900/20">
-        <p className="text-xs text-blue-800 dark:text-blue-200">
+      <div className="mt-6 rounded-md bg-blue-900/20 p-3">
+        <p className="text-xs text-blue-200">
           <strong>Note:</strong> If you signed up with Microsoft or Google, please use the password reset option provided by your identity provider.
         </p>
       </div>

@@ -146,8 +146,8 @@ export function LoginForm() {
   }
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <h2 className="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+    <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900 p-6 sm:p-8">
+      <h2 className="mb-6 text-2xl font-semibold text-white">
         Sign In
       </h2>
 
@@ -157,11 +157,11 @@ export function LoginForm() {
       </div>
 
       {/* Microsoft Sign-In Button (Primary) */}
-      <div className="mb-6">
+      <div className="mb-6 w-full min-w-0">
         <Button
           type="button"
           onClick={handleMicrosoftLogin}
-          className="w-full"
+          className="w-full bg-white text-zinc-900 hover:bg-zinc-100"
           size="lg"
           disabled={isSubmitting}
         >
@@ -182,12 +182,12 @@ export function LoginForm() {
 
       {/* Google Sign-In Button (if enabled) */}
       {env.features.enableGoogleSignIn && (
-        <div className="mb-6">
+        <div className="mb-6 w-full min-w-0">
           <Button
             type="button"
             variant="outline"
             onClick={handleGoogleLogin}
-            className="w-full"
+            className="w-full bg-white text-zinc-900 border-zinc-300 hover:bg-zinc-100"
             size="lg"
             disabled={isSubmitting}
           >
@@ -205,17 +205,17 @@ export function LoginForm() {
       {/* Divider for email/password form */}
       <div className="relative my-6">
         <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-zinc-300 dark:border-zinc-700" />
+          <div className="w-full border-t border-zinc-700" />
         </div>
         <div className="relative flex justify-center text-sm">
-          <span className="bg-white px-2 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+          <span className="bg-zinc-900 px-2 text-white/60">
             Or continue with email
           </span>
         </div>
       </div>
 
       {/* Email/Password Form */}
-      <form onSubmit={handleEmailPasswordSubmit} className="space-y-4">
+      <form onSubmit={handleEmailPasswordSubmit} className="space-y-4 w-full min-w-0">
             <FormInput
               name="email"
               type="email"
@@ -243,7 +243,7 @@ export function LoginForm() {
             <div className="flex items-center justify-between">
               <Link
                 href="/reset-password"
-                className="text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                className="text-sm text-white/70 hover:text-white"
               >
                 Forgot password?
               </Link>
@@ -253,7 +253,7 @@ export function LoginForm() {
               type="submit"
               isLoading={isSubmitting}
               loadingText="Signing in..."
-              className="w-full"
+              className="w-full bg-white text-zinc-900 hover:bg-zinc-100"
               size="lg"
             >
               Sign In
@@ -262,11 +262,11 @@ export function LoginForm() {
 
       {/* Sign Up Link */}
       <div className="mt-6 text-center">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-white/70">
           Don't have an account?{" "}
           <Link
             href="/signup"
-            className="font-medium text-zinc-900 hover:underline dark:text-zinc-100"
+            className="font-medium text-white hover:underline"
           >
             Sign up
           </Link>

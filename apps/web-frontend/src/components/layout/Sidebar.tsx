@@ -14,7 +14,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Mic, Settings, Menu, X } from "lucide-react";
+import { LayoutDashboard, Mic, Settings, Menu, X, Bot, BookOpen, Calendar } from "lucide-react";
 import { clsx } from "clsx";
 
 export interface SidebarItem {
@@ -50,7 +50,9 @@ export interface SidebarProps {
 const defaultItems: SidebarItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard className="h-5 w-5" /> },
   { label: "Recordings", href: "/recordings", icon: <Mic className="h-5 w-5" /> },
-  { label: "Settings", href: "/settings", icon: <Settings className="h-5 w-5" /> },
+  { label: "Agent", href: "/agent", icon: <Bot className="h-5 w-5" /> },
+  { label: "Knowledge Base", href: "/knowledge", icon: <BookOpen className="h-5 w-5" /> },
+  { label: "Appointments", href: "/appointments", icon: <Calendar className="h-5 w-5" /> },
 ];
 
 /**
