@@ -30,8 +30,8 @@ export default function AuthLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-zinc-50 via-white to-zinc-100 px-4 py-12 dark:from-zinc-950 dark:via-black dark:to-zinc-900 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-black px-4 py-12 sm:px-6 lg:px-8">
+      <div className="w-full max-w-2xl">
         {/* Logo/Branding */}
         <div className="mb-8 text-center">
           <Link
@@ -41,11 +41,11 @@ export default function AuthLayout({
           >
             <div className="flex flex-col items-center space-y-2">
               {/* Logo Text */}
-              <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 sm:text-4xl">
+              <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
                 LexiqAI
               </h1>
               {/* Tagline */}
-              <p className="text-sm font-medium text-zinc-600 dark:text-zinc-400">
+              <p className="text-sm font-medium text-white/80">
                 Enterprise Voice Orchestration
               </p>
             </div>
@@ -57,18 +57,18 @@ export default function AuthLayout({
 
         {/* Footer Links */}
         <div className="mt-8 text-center">
-          <p className="text-xs text-zinc-500 dark:text-zinc-500">
+          <p className="text-xs text-white/60">
             By continuing, you agree to our{" "}
             <Link
               href="/terms"
-              className="font-medium text-zinc-900 underline hover:text-zinc-700 dark:text-zinc-300 dark:hover:text-zinc-100"
+              className="font-medium text-white underline hover:text-white/80"
             >
               Terms of Service
             </Link>{" "}
             and{" "}
             <Link
               href="/privacy"
-              className="font-medium text-zinc-900 underline hover:text-zinc-700 dark:text-zinc-300 dark:hover:text-zinc-100"
+              className="font-medium text-white underline hover:text-white/80"
             >
               Privacy Policy
             </Link>

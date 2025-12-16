@@ -4,25 +4,26 @@
  * Card Component
  * 
  * A container component for grouping related content.
+ * Follows the LexiqAI design system with border-based structure (no shadows).
  * 
  * @example
  * ```tsx
- * <Card>
+ * <Card hoverable>
  *   <CardHeader>
  *     <CardTitle>Title</CardTitle>
  *   </CardHeader>
  *   <CardContent>Content here</CardContent>
- * </CardHeader>
  * </Card>
  * ```
  */
 
-import { type HTMLAttributes, type ReactNode } from "react";
+import { type HTMLAttributes } from "react";
 import { clsx } from "clsx";
 
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   /**
    * Whether the card has a hover effect
+   * Adds border color transition on hover (border-zinc-400)
    * @default false
    */
   hoverable?: boolean;
@@ -31,14 +32,21 @@ export interface CardProps extends HTMLAttributes<HTMLDivElement> {
    * @default true
    */
   padded?: boolean;
+  /**
+   * Border radius size
+   * @default "lg" (8px)
+   */
+  radius?: "md" | "lg";
 }
 
 /**
  * Card container component
+ * Uses border-based structure (no shadows) per design system
  */
 export function Card({
   hoverable = false,
   padded = true,
+  radius = "lg",
   className,
   children,
   ...props
@@ -46,9 +54,14 @@ export function Card({
   return (
     <div
       className={clsx(
-        "rounded-lg border border-zinc-200 bg-white",
+        // Base styles - border-based structure (no shadows)
+        "border border-zinc-200 bg-white",
         "dark:border-zinc-800 dark:bg-zinc-900",
-        hoverable && "transition-shadow hover:shadow-md",
+        // Border radius - matches design system (rounded-md: 6px, rounded-lg: 8px)
+        radius === "md" ? "rounded-md" : "rounded-lg",
+        // Hover effect - subtle border color transition
+        hoverable && "transition-colors hover:border-zinc-400 dark:hover:border-zinc-600",
+        // Padding
         padded && "p-6",
         className
       )}

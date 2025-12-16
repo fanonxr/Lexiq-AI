@@ -3,7 +3,7 @@
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { UserMenu } from "@/components/layout/UserMenu";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 
 /**
@@ -27,8 +27,37 @@ export default function DashboardLayout({
     return "Dashboard";
   };
 
+  // Keyboard navigation: Esc to close mobile menu
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle Esc if not typing in an input/textarea
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
+      if (e.key === "Escape" && mobileMenuOpen) {
+        e.preventDefault();
+        setMobileMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileMenuOpen]);
+
   return (
     <ProtectedRoute>
+      {/* Skip to main content link for keyboard navigation */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-zinc-900 focus:text-white focus:rounded-md focus:ring-2 focus:ring-ring focus:ring-offset-2"
+      >
+        Skip to main content
+      </a>
+
       <div className="flex min-h-screen bg-zinc-50 dark:bg-zinc-950">
         {/* Sidebar */}
         <Sidebar
@@ -37,9 +66,9 @@ export default function DashboardLayout({
         />
 
         {/* Main Content */}
-        <main className="flex flex-1 flex-col overflow-hidden md:ml-0">
+        <main id="main-content" className="flex flex-1 flex-col overflow-hidden md:ml-0" role="main">
           {/* Top Bar */}
-          <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-900 sm:px-6 lg:px-8">
+          <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-900 sm:px-6 lg:px-8" role="banner">
             <div className="flex flex-1 items-center">
               {/* Mobile: Add spacing for menu button */}
               <div className="md:hidden w-12" />

@@ -51,23 +51,19 @@ export function Alert({
   children,
   ...props
 }: AlertProps) {
-  // Variant styles
+  // Variant styles (dark theme)
   const variantStyles = {
     success: [
-      "bg-green-50 border-green-200 text-green-800",
-      "dark:bg-green-900/20 dark:border-green-800 dark:text-green-200",
+      "bg-green-900/20 border-green-800 text-green-200",
     ],
     error: [
-      "bg-red-50 border-red-200 text-red-800",
-      "dark:bg-red-900/20 dark:border-red-800 dark:text-red-200",
+      "bg-red-900/20 border-red-800 text-red-200",
     ],
     warning: [
-      "bg-yellow-50 border-yellow-200 text-yellow-800",
-      "dark:bg-yellow-900/20 dark:border-yellow-800 dark:text-yellow-200",
+      "bg-yellow-900/20 border-yellow-800 text-yellow-200",
     ],
     info: [
-      "bg-blue-50 border-blue-200 text-blue-800",
-      "dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-200",
+      "bg-blue-900/20 border-blue-800 text-blue-200",
     ],
   };
 
@@ -95,7 +91,7 @@ export function Alert({
           <button
             type="button"
             onClick={onDismiss}
-            className="ml-4 -mt-1 -mr-2 flex-shrink-0 rounded-md p-1.5 transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+            className="ml-4 -mt-1 -mr-2 flex-shrink-0 rounded-md p-1.5 transition-colors hover:bg-white/10 text-white/80"
             aria-label="Dismiss alert"
           >
             <svg
