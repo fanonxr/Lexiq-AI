@@ -111,3 +111,57 @@ output "managed_identity_name" {
   value       = module.identity.name
 }
 
+# Key Vault Outputs
+output "key_vault_name" {
+  description = "Name of the Key Vault (if enabled)"
+  value       = var.openai_key_vault_enabled && length(azurerm_key_vault.main) > 0 ? azurerm_key_vault.main[0].name : null
+}
+
+output "key_vault_id" {
+  description = "ID of the Key Vault (if enabled)"
+  value       = var.openai_key_vault_enabled && length(azurerm_key_vault.main) > 0 ? azurerm_key_vault.main[0].id : null
+}
+
+# Azure OpenAI Outputs
+output "openai_endpoint" {
+  description = "Endpoint URL for Azure OpenAI"
+  value       = module.openai.endpoint
+  sensitive   = true
+}
+
+output "openai_account_name" {
+  description = "Name of the Azure OpenAI account"
+  value       = module.openai.account_name
+}
+
+output "openai_deployment_names" {
+  description = "List of deployed model names"
+  value       = module.openai.deployment_names
+}
+
+output "openai_key_vault_secret_name_api_key" {
+  description = "Key Vault secret name for OpenAI API key (if Key Vault enabled)"
+  value       = module.openai.key_vault_secret_name_api_key
+}
+
+output "openai_key_vault_secret_name_endpoint" {
+  description = "Key Vault secret name for OpenAI endpoint (if Key Vault enabled)"
+  value       = module.openai.key_vault_secret_name_endpoint
+}
+
+# Storage Account Outputs
+output "storage_account_name" {
+  description = "Name of the storage account"
+  value       = module.storage.storage_account_name
+}
+
+output "storage_account_id" {
+  description = "ID of the storage account"
+  value       = module.storage.storage_account_id
+}
+
+output "storage_primary_blob_endpoint" {
+  description = "Primary blob endpoint URL"
+  value       = module.storage.primary_blob_endpoint
+}
+

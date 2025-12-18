@@ -176,3 +176,105 @@ module "identity" {
   ]
 }
 
+# Key Vault for Secrets Management
+# Stores sensitive configuration like API keys, connection strings, etc.
+resource "azurerm_key_vault" "main" {
+  count = var.openai_key_vault_enabled ? 1 : 0
+
+  name                = "${var.project_name}-kv-${var.environment}"
+  location            = var.azure_location
+  resource_group_name = azurerm_resource_group.main.name
+  tenant_id           = var.tenant_id
+  sku_name            = "standard"
+
+  # Soft delete and purge protection
+  soft_delete_retention_days = 7
+  purge_protection_enabled   = var.environment == "prod"
+
+  # Network access (can be restricted later)
+  public_network_access_enabled = true
+
+  # Access policies (will be enhanced with Managed Identity later)
+  access_policy {
+    tenant_id = var.tenant_id
+    object_id = data.azurerm_client_config.current[0].object_id
+
+    secret_permissions = [
+      "Get",
+      "List",
+      "Set",
+      "Delete",
+      "Recover",
+      "Backup",
+      "Restore",
+      "Purge",
+    ]
+  }
+
+  tags = merge(
+    var.common_tags,
+    {
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+    }
+  )
+}
+
+# Data source for current Azure client config (for Key Vault access policy)
+data "azurerm_client_config" "current" {
+  count = var.openai_key_vault_enabled ? 1 : 0
+}
+
+# Azure OpenAI Module
+module "openai" {
+  source = "./modules/openai"
+
+  project_name        = var.project_name
+  environment         = var.environment
+  location            = var.azure_location
+  resource_group_name = azurerm_resource_group.main.name
+
+  sku_name                        = var.openai_sku_name
+  public_network_access_enabled   = var.openai_public_network_access_enabled
+  model_deployments               = var.openai_model_deployments
+  key_vault_id                    = var.openai_key_vault_enabled && length(azurerm_key_vault.main) > 0 ? azurerm_key_vault.main[0].id : null
+  store_secrets_in_key_vault      = var.openai_key_vault_enabled
+
+  common_tags = merge(
+    var.common_tags,
+    {
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+    }
+  )
+}
+
+# Storage Account Module
+# Creates Azure Blob Storage for knowledge base documents (RAG)
+module "storage" {
+  source = "./modules/storage"
+
+  project_name        = var.project_name
+  environment         = var.environment
+  location            = var.azure_location
+  resource_group_name = azurerm_resource_group.main.name
+
+  account_tier             = var.storage_account_tier
+  account_replication_type = var.storage_account_replication_type
+  public_network_access_enabled = var.storage_public_network_access_enabled
+
+  # Enable features for production
+  versioning_enabled                = var.environment == "prod"
+  blob_soft_delete_retention_days   = var.storage_blob_soft_delete_retention_days
+  container_soft_delete_retention_days = var.storage_container_soft_delete_retention_days
+  change_feed_enabled              = var.environment == "prod"
+
+  common_tags = merge(
+    var.common_tags,
+    {
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+    }
+  )
+}
+

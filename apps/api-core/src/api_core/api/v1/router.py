@@ -8,6 +8,7 @@ Routers included:
 - User Management (`/api/v1/users/*`)
 - Billing & Subscriptions (`/api/v1/billing/*`)
 - Dashboard (`/api/v1/dashboard/*`)
+- Knowledge Base (`/api/v1/knowledge/*`)
 
 Common middleware (applied at application level in main.py):
 - CORS: Cross-origin resource sharing
@@ -28,7 +29,19 @@ Rate Limiting:
 
 from fastapi import APIRouter
 
-from api_core.api.v1 import auth, billing, dashboard, users
+from api_core.api.v1 import (
+    appointments,
+    auth,
+    billing,
+    calls,
+    conversations,
+    dashboard,
+    firms,
+    knowledge,
+    leads,
+    notifications,
+    users,
+)
 
 # Create v1 API router with version prefix
 router = APIRouter(
@@ -47,6 +60,13 @@ router.include_router(auth.router)
 router.include_router(users.router)
 router.include_router(billing.router)
 router.include_router(dashboard.router)
+router.include_router(knowledge.router)
+router.include_router(appointments.router)
+router.include_router(leads.router)
+router.include_router(notifications.router)
+router.include_router(firms.router)
+router.include_router(conversations.router)
+router.include_router(calls.router)
 
 
 @router.get(
@@ -73,5 +93,12 @@ async def api_info():
             "users": "/api/v1/users",
             "billing": "/api/v1/billing",
             "dashboard": "/api/v1/dashboard",
+            "knowledge": "/api/v1/knowledge",
+            "appointments": "/api/v1/appointments",
+            "leads": "/api/v1/leads",
+            "notifications": "/api/v1/notifications",
+            "firms": "/api/v1/firms",
+            "conversations": "/api/v1/conversations",
+            "calls": "/api/v1/calls",
         },
     }

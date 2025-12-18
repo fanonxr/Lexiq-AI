@@ -19,9 +19,9 @@ RUN poetry config virtualenvs.create false
 COPY apps/api-core/pyproject.toml apps/api-core/poetry.lock* ./
 
 # Install dependencies (without the package itself first)
-RUN poetry install --no-dev --no-interaction --no-ansi --no-root || \
-    (echo "poetry.lock not found, installing dependencies..." && \
-     poetry install --no-dev --no-interaction --no-ansi --no-root)
+# Update lock file to include any new dependencies from pyproject.toml, then install
+RUN poetry lock && \
+    poetry install --only main --no-interaction --no-ansi --no-root
 
 # Copy application code
 COPY apps/api-core/src/ ./src/
