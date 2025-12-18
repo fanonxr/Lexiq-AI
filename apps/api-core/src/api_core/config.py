@@ -50,6 +50,25 @@ class RedisSettings(BaseSettings):
     socket_connect_timeout: int = Field(default=5, description="Socket connect timeout in seconds")
 
 
+class RabbitMQSettings(BaseSettings):
+    """RabbitMQ configuration (used to publish ingestion jobs)."""
+
+    model_config = SettingsConfigDict(env_prefix="RABBITMQ_", case_sensitive=False)
+
+    url: str = Field(
+        default="amqp://guest:guest@localhost:5672/",
+        description="RabbitMQ connection URL",
+    )
+    exchange_name: str = Field(
+        default="document-ingestion-exchange",
+        description="Exchange name for document ingestion jobs",
+    )
+    routing_key: str = Field(
+        default="document.ingestion",
+        description="Routing key for ingestion messages",
+    )
+
+
 class AzureADB2CSettings(BaseSettings):
     """Azure AD B2C configuration."""
 
@@ -91,6 +110,44 @@ class AzureKeyVaultSettings(BaseSettings):
     def is_configured(self) -> bool:
         """Check if Azure Key Vault is configured."""
         return self.enabled and bool(self.url)
+
+
+class StorageSettings(BaseSettings):
+    """Azure Blob Storage configuration for knowledge base files."""
+
+    model_config = SettingsConfigDict(env_prefix="STORAGE_", case_sensitive=False)
+
+    account_name: Optional[str] = Field(
+        default=None, description="Azure Storage Account name", alias="ACCOUNT_NAME"
+    )
+    account_key: Optional[str] = Field(
+        default=None, description="Azure Storage Account key (use Managed Identity instead)", alias="ACCOUNT_KEY"
+    )
+    connection_string: Optional[str] = Field(
+        default=None,
+        description="Azure Storage connection string (use Managed Identity instead)",
+        alias="CONNECTION_STRING",
+    )
+    use_managed_identity: bool = Field(
+        default=True,
+        description="Use Managed Identity for authentication (recommended)",
+        alias="USE_MANAGED_IDENTITY",
+    )
+    max_file_size_mb: int = Field(
+        default=100, description="Maximum file size in MB", alias="MAX_FILE_SIZE_MB"
+    )
+    allowed_file_types: List[str] = Field(
+        default_factory=lambda: ["pdf", "docx", "txt", "md"],
+        description="Allowed file types for upload",
+        alias="ALLOWED_FILE_TYPES",
+    )
+
+    @property
+    def is_configured(self) -> bool:
+        """Check if storage is configured."""
+        return bool(self.account_name) and (
+            bool(self.connection_string) or bool(self.account_key) or self.use_managed_identity
+        )
 
 
 class JWTSettings(BaseSettings):
@@ -200,11 +257,25 @@ class Settings(BaseSettings):
     # API settings
     api_v1_prefix: str = Field(default="/api/v1", description="API v1 prefix")
 
+    # Internal service-to-service auth (protect internal endpoints)
+    internal_api_key_enabled: bool = Field(
+        default=False,
+        description="Enable API-key auth for internal service endpoints",
+        alias="INTERNAL_API_KEY_ENABLED",
+    )
+    internal_api_key: Optional[str] = Field(
+        default=None,
+        description="Shared secret API key for internal services (sent as X-Internal-API-Key)",
+        alias="INTERNAL_API_KEY",
+    )
+
     # Sub-settings
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
+    rabbitmq: RabbitMQSettings = Field(default_factory=RabbitMQSettings)
     azure_ad_b2c: AzureADB2CSettings = Field(default_factory=AzureADB2CSettings)
     azure_key_vault: AzureKeyVaultSettings = Field(default_factory=AzureKeyVaultSettings)
+    storage: StorageSettings = Field(default_factory=StorageSettings)
     jwt: JWTSettings = Field(default_factory=JWTSettings)
     cors: CorsSettings = Field(default_factory=CorsSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
@@ -311,6 +382,10 @@ class Settings(BaseSettings):
                     "Azure Key Vault is not configured in production. "
                     "Consider using it for secure secret management.",
                     UserWarning,
+                )
+            if self.internal_api_key_enabled and not self.internal_api_key:
+                raise ValueError(
+                    "INTERNAL_API_KEY must be set when INTERNAL_API_KEY_ENABLED=true (internal endpoints protection)."
                 )
 
 

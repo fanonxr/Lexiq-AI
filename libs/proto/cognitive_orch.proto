@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package cognitive_orch;
+
+// Cognitive Orchestrator gRPC Service
+service CognitiveOrchestrator {
+    // Process text input and stream response (primary method for voice conversations)
+    rpc ProcessText(TextRequest) returns (stream TextResponse);
+    
+    // Get current conversation state
+    rpc GetConversationState(StateRequest) returns (StateResponse);
+    
+    // Clear conversation state
+    rpc ClearConversation(ClearRequest) returns (ClearResponse);
+    
+    // Health check
+    rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+// Request to process text input
+message TextRequest {
+    string conversation_id = 1;        // Optional: existing conversation ID
+    string text = 2;                   // User's transcribed text
+    string user_id = 3;                // User identifier
+    string firm_id = 4;                // Firm/tenant identifier
+    bool include_rag = 5;              // Enable RAG context retrieval
+    bool tools_enabled = 6;            // Enable tool/function calling
+    string model = 7;                 // Optional: model override (e.g., "azure/gpt-4o")
+}
+
+// Streaming response chunks
+message TextResponse {
+    oneof content {
+        string text_chunk = 1;         // Text content chunk
+        ToolCall tool_call = 2;        // Tool call request (for logging/debugging)
+        ToolResult tool_result = 3;    // Tool execution result (for logging/debugging)
+        Error error = 4;               // Error occurred
+    }
+    string conversation_id = 5;        // Conversation ID (for correlation)
+    bool is_done = 6;                  // True when stream is complete
+    int32 total_tokens = 7;            // Optional: token count (if available)
+}
+
+// Tool call information (for observability)
+message ToolCall {
+    string tool_name = 1;
+    string parameters_json = 2;        // JSON string of tool parameters
+    string call_id = 3;
+}
+
+// Tool execution result (for observability)
+message ToolResult {
+    string call_id = 1;
+    string result_json = 2;            // JSON string of tool result
+    bool success = 3;
+    string error_message = 4;           // If success=false
+}
+
+// Error information
+message Error {
+    string code = 1;                   // Error code (e.g., "TOOL_EXECUTION_FAILED")
+    string message = 2;                // Human-readable error message
+    string details_json = 3;           // Optional: additional error details (JSON)
+}
+
+// Request conversation state
+message StateRequest {
+    string conversation_id = 1;
+}
+
+// Conversation state response
+message StateResponse {
+    string conversation_id = 1;
+    repeated Message messages = 2;     // Conversation history
+    int32 total_tokens = 3;            // Total tokens used
+    string user_id = 4;
+    string firm_id = 5;
+    int64 created_at = 6;              // Unix timestamp
+    int64 updated_at = 7;              // Unix timestamp
+}
+
+// Individual message in conversation
+message Message {
+    string role = 1;                   // "user", "assistant", "system", "tool"
+    string content = 2;
+    int64 timestamp = 3;               // Unix timestamp
+    string tool_call_id = 4;           // Optional: if role="tool"
+    string tool_name = 5;              // Optional: if role="tool"
+}
+
+// Clear conversation request
+message ClearRequest {
+    string conversation_id = 1;
+}
+
+// Clear conversation response
+message ClearResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// Health check request
+message HealthRequest {}
+
+// Health check response
+message HealthResponse {
+    bool healthy = 1;
+    string status = 2;                 // "healthy", "degraded", "unhealthy"
+    string version = 3;                // Service version
+}
+

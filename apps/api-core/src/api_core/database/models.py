@@ -80,7 +80,13 @@ class User(Base):
     # Additional metadata
     metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string for extra data
 
+    # Firm relationship (multi-tenant support)
+    firm_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("firms.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # Relationships (defined after related models)
+    firm: Mapped[Optional["Firm"]] = relationship("Firm", back_populates="users")
     subscriptions: Mapped[list["Subscription"]] = relationship(
         "Subscription", back_populates="user", cascade="all, delete-orphan"
     )
@@ -89,6 +95,15 @@ class User(Base):
     )
     usage_records: Mapped[list["UsageRecord"]] = relationship(
         "UsageRecord", back_populates="user", cascade="all, delete-orphan"
+    )
+    knowledge_base_files: Mapped[list["KnowledgeBaseFile"]] = relationship(
+        "KnowledgeBaseFile", back_populates="user", cascade="all, delete-orphan"
+    )
+    conversations: Mapped[list["Conversation"]] = relationship(
+        "Conversation", back_populates="user", cascade="all, delete-orphan"
+    )
+    calls: Mapped[list["Call"]] = relationship(
+        "Call", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
@@ -343,3 +358,442 @@ class UsageRecord(Base):
         return f"<UsageRecord(id={self.id}, user_id={self.user_id}, feature={self.feature})>"
 
 
+class KnowledgeBaseFile(Base):
+    """Knowledge base file model for RAG document storage."""
+
+    __tablename__ = "knowledge_base_files"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Foreign keys
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    firm_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+
+    # File metadata
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_type: Mapped[str] = mapped_column(String(50), nullable=False)  # pdf, docx, txt, etc.
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)  # bytes
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)  # Blob Storage path
+
+    # Processing status
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="pending",
+        nullable=False,
+        index=True,
+    )  # pending, processing, indexed, failed
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Qdrant integration
+    qdrant_collection: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    qdrant_point_ids: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # JSON array of point IDs
+
+    # Timestamps
+    indexed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="knowledge_base_files")
+
+    def __repr__(self) -> str:
+        """String representation of KnowledgeBaseFile."""
+        return f"<KnowledgeBaseFile(id={self.id}, filename={self.filename}, status={self.status})>"
+
+
+class Appointment(Base):
+    """LexiqAI-native appointment booking model (MVP).
+
+    This is intentionally minimal for Phase 5 tool execution:
+    - Internal booking via Cognitive Orchestrator
+    - Idempotent creation via idempotency_key
+    """
+
+    __tablename__ = "appointments"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Tenant scope
+    firm_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+
+    # Optional link to an authenticated user (future)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    # Timing
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Details
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="booked", index=True)
+
+    # Contact info (LexiqAI-native)
+    contact_full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    contact_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Idempotency
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<Appointment(id={self.id}, firm_id={self.firm_id}, start_at={self.start_at})>"
+
+
+class Lead(Base):
+    """LexiqAI-native lead/intake record (MVP).
+
+    Created via Cognitive Orchestrator tools with confirmation + idempotency.
+    """
+
+    __tablename__ = "leads"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Tenant scope
+    firm_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+
+    # Optional link to authenticated user (future)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    # Contact / intake
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    matter_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="new", index=True)
+
+    # Idempotency
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<Lead(id={self.id}, firm_id={self.firm_id}, full_name={self.full_name})>"
+
+
+class Notification(Base):
+    """LexiqAI-native notification outbox record (MVP).
+
+    For Phase 5 tool execution, we record notifications that should be sent.
+    Provider delivery (SendGrid/Twilio/etc.) can be implemented later via Integration Worker.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    firm_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # email|sms
+    to: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="queued", index=True)
+
+    # Idempotency
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<Notification(id={self.id}, channel={self.channel}, to={self.to}, status={self.status})>"
+
+
+class Firm(Base):
+    """Firm/Organization model for multi-tenant support."""
+
+    __tablename__ = "firms"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Firm details
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    domain: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True, index=True)
+
+    # AI Configuration
+    default_model: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # Override global default
+    system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Custom persona
+    specialties: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # JSON array of specialties
+
+    # Qdrant configuration
+    qdrant_collection: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, unique=True, index=True
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    # Relationships
+    users: Mapped[list["User"]] = relationship("User", back_populates="firm")
+    conversations: Mapped[list["Conversation"]] = relationship(
+        "Conversation", back_populates="firm"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Firm(id={self.id}, name={self.name})>"
+
+
+class Conversation(Base):
+    """Conversation database model for tracking AI conversations."""
+
+    __tablename__ = "conversations"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Foreign keys
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    firm_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("firms.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    call_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+
+    # Conversation metadata
+    status: Mapped[str] = mapped_column(String(50), default="active", nullable=False, index=True)
+    model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Timestamps
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="conversations")
+    firm: Mapped[Optional["Firm"]] = relationship("Firm", back_populates="conversations")
+    messages: Mapped[list["ConversationMessage"]] = relationship(
+        "ConversationMessage", back_populates="conversation", cascade="all, delete-orphan"
+    )
+    calls: Mapped[list["Call"]] = relationship(
+        "Call", back_populates="conversation"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Conversation(id={self.id}, user_id={self.user_id}, status={self.status})>"
+
+
+class ConversationMessage(Base):
+    """Individual message within a conversation."""
+
+    __tablename__ = "conversation_messages"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Foreign key
+    conversation_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Message content
+    role: Mapped[str] = mapped_column(String(50), nullable=False)  # user, assistant, system, tool
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_calls: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+    tool_call_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Metadata
+    tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+
+    # Relationships
+    conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")
+
+    def __repr__(self) -> str:
+        return f"<ConversationMessage(id={self.id}, conversation_id={self.conversation_id}, role={self.role})>"
+
+
+class Call(Base):
+    """Call database model for tracking phone calls."""
+
+    __tablename__ = "calls"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Foreign keys
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    conversation_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    # Call details
+    phone_number: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    direction: Mapped[str] = mapped_column(String(10), nullable=False)  # inbound, outbound
+    status: Mapped[str] = mapped_column(
+        String(50), default="initiated", nullable=False, index=True
+    )  # initiated, ringing, in-progress, completed, failed, missed
+
+    # Call metadata
+    duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    recording_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Twilio integration
+    twilio_call_sid: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, unique=True, index=True
+    )
+
+    # Timestamps
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="calls")
+    conversation: Mapped[Optional["Conversation"]] = relationship(
+        "Conversation", back_populates="calls"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Call(id={self.id}, user_id={self.user_id}, status={self.status}, phone_number={self.phone_number})>"
+
+
+class FirmPersona(Base):
+    """Firm persona / system prompt overrides (MVP).
+
+    This provides a Core API-backed source of truth for firm-specific system prompts.
+    Note: This is a separate table from Firm to allow for persona versioning/history in the future.
+    """
+
+    __tablename__ = "firm_personas"
+
+    firm_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("firms.id", ondelete="CASCADE"), primary_key=True
+    )
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<FirmPersona(firm_id={self.firm_id})>"

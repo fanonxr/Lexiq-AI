@@ -38,6 +38,40 @@ redis_capacity = 0 # C0 for dev
 # redis_capacity = 1 # C1 for prod
 redis_version  = "7.0"
 
+# Azure OpenAI Configuration
+openai_sku_name = "S0" # Standard tier for dev
+# openai_sku_name = "S1" # For prod (higher throughput)
+openai_public_network_access_enabled = true # Set to false for private endpoints
+openai_key_vault_enabled = true # Store API keys in Key Vault
+
+# Model deployments (deploy specific models)
+openai_model_deployments = {
+  "gpt-4o" = {
+    model_name    = "gpt-4o"
+    model_version = "2024-08-06"  # Specific version required (not "latest")
+    scale_type    = "Standard"
+    scale_capacity = 1  # Start with 1 (minimum) - increase after quota approval
+    scale_tier    = "Standard"  # Options: "Free", "Basic", "Standard", "Premium", "Enterprise"
+    scale_size    = null        # Optional, only needed for certain tiers
+  }
+  # Add more models as needed:
+  # "gpt-4-turbo" = {
+  #   model_name    = "gpt-4-turbo"
+  #   model_version = "latest"
+  #   scale_type    = "Standard"
+  #   scale_capacity = 10
+  #   scale_tier    = "Tier1"
+  #   scale_size    = "1"
+  #   }
+}
+
+# Storage Account Configuration (for RAG document storage)
+storage_account_tier = "Standard"  # Standard or Premium
+storage_account_replication_type = "LRS"  # LRS for dev, GRS/ZRS for prod
+storage_public_network_access_enabled = true  # Set to false for private endpoints
+storage_blob_soft_delete_retention_days = 7  # Days to retain soft-deleted blobs
+storage_container_soft_delete_retention_days = 7  # Days to retain soft-deleted containers
+
 # Entra ID Configuration (for future use)
 # entra_tenant_domain = "lexiqai.onmicrosoft.com"
 # entra_app_client_id = "<client-id>"

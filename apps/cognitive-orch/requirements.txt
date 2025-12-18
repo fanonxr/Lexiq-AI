@@ -1,0 +1,26 @@
+# Core Framework
+fastapi==0.110.0
+uvicorn[standard]==0.27.1
+grpcio==1.62.0
+grpcio-tools==1.62.0
+protobuf>=4.21.6,<5.0  # Must match gencode version from grpcio-tools 1.62.0
+
+# The Magic Switch (Model Agnostic Router)
+litellm==1.34.0
+
+# Infrastructure
+redis[hiredis]==5.0.3
+qdrant-client==1.8.0
+httpx==0.25.2
+
+# Configuration & Validation
+pydantic==2.5.0
+pydantic-settings==2.2.1
+python-dotenv==1.0.1
+
+# Retry Logic
+tenacity==8.2.3
+
+# Utilities
+python-json-logger==2.0.7
+

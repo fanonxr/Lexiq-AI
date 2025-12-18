@@ -20,6 +20,7 @@ from api_core.config import get_settings
 from api_core.database import close_db, init_db
 from api_core.exceptions import APIException
 from api_core.middleware import setup_middleware
+from api_core.services.ingestion_queue import publisher as ingestion_publisher
 from api_core.utils.logging import get_logger, log_error, setup_logging
 
 # Set up logging first
@@ -59,6 +60,16 @@ async def lifespan(app: FastAPI):
         # No explicit startup needed - JWKS are fetched on first token validation
         logger.info("Azure AD B2C client will initialize on first use")
 
+        # RabbitMQ publisher for ingestion jobs
+        try:
+            await ingestion_publisher.connect()
+            app.state.ingestion_publisher = ingestion_publisher
+            logger.info("RabbitMQ ingestion publisher initialized successfully")
+        except Exception as e:
+            # Don't fail startup in development; uploads will fail to enqueue instead
+            logger.error(f"Failed to initialize RabbitMQ publisher: {e}", exc_info=True)
+            app.state.ingestion_publisher = None
+
         logger.info("API Core service started successfully")
         yield
     except Exception as e:
@@ -71,6 +82,14 @@ async def lifespan(app: FastAPI):
             # Close database connection pool
             await close_db()
             logger.info("Database connection closed successfully")
+
+            # Close RabbitMQ publisher
+            try:
+                if hasattr(app.state, "ingestion_publisher") and app.state.ingestion_publisher:
+                    await app.state.ingestion_publisher.close()
+                    logger.info("RabbitMQ ingestion publisher closed successfully")
+            except Exception as e:
+                logger.error(f"Error closing RabbitMQ publisher: {e}", exc_info=True)
 
             # Close Redis connections if any were opened
             # (Currently not needed as connections are on-demand)

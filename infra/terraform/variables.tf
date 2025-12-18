@@ -138,6 +138,78 @@ variable "redis_version" {
   default     = "7.0"
 }
 
+# Azure OpenAI Variables
+variable "openai_sku_name" {
+  description = "Azure OpenAI SKU name (S0 for dev, S1+ for prod)"
+  type        = string
+  default     = "S0"
+}
+
+variable "openai_public_network_access_enabled" {
+  description = "Whether to enable public network access for Azure OpenAI"
+  type        = bool
+  default     = true
+}
+
+variable "openai_model_deployments" {
+  description = "Map of Azure OpenAI model deployments. Key is deployment name, value contains model config."
+  type = map(object({
+    model_name    = string
+    model_version = string
+    scale_type    = string
+    scale_capacity = number
+    scale_tier    = optional(string) # One of: "Free", "Basic", "Standard", "Premium", "Enterprise"
+    scale_size    = optional(string)
+  }))
+  default = {
+    "gpt-4o" = {
+      model_name    = "gpt-4o"
+      model_version = "2024-08-06"  # Specific version required (2024-08-06 is the default)
+      scale_type    = "Standard"
+      scale_capacity = 1  # Start with 1 (minimum) - increase after quota approval
+      scale_tier    = "Standard"  # Valid values: "Free", "Basic", "Standard", "Premium", "Enterprise"
+      scale_size    = null
+    }
+  }
+}
+
+variable "openai_key_vault_enabled" {
+  description = "Whether to store OpenAI secrets in Key Vault (requires Key Vault to exist)"
+  type        = bool
+  default     = true
+}
+
+# Storage Account Variables
+variable "storage_account_tier" {
+  description = "Storage account tier (Standard or Premium)"
+  type        = string
+  default     = "Standard"
+}
+
+variable "storage_account_replication_type" {
+  description = "Storage account replication type (LRS for dev, GRS/ZRS for prod)"
+  type        = string
+  default     = "LRS"
+}
+
+variable "storage_public_network_access_enabled" {
+  description = "Whether public network access is enabled for storage account"
+  type        = bool
+  default     = true
+}
+
+variable "storage_blob_soft_delete_retention_days" {
+  description = "Number of days to retain soft-deleted blobs"
+  type        = number
+  default     = 7
+}
+
+variable "storage_container_soft_delete_retention_days" {
+  description = "Number of days to retain soft-deleted containers"
+  type        = number
+  default     = 7
+}
+
 # Container Apps Variables (for future use)
 variable "container_apps_environment_name" {
   description = "Name for Container Apps Environment"

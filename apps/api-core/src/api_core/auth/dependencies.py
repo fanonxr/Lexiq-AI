@@ -266,3 +266,60 @@ async def get_optional_user(
     except Exception as e:
         logger.debug(f"Optional authentication failed: {e}")
         return None
+
+
+async def get_user_or_internal_auth(
+    token: Optional[str] = Depends(get_token_from_header),
+    x_internal_api_key: Optional[str] = Header(default=None, alias="X-Internal-API-Key"),
+) -> Optional[TokenValidationResult]:
+    """
+    FastAPI dependency that supports both user authentication and internal API key.
+    
+    Returns:
+        - TokenValidationResult if user is authenticated
+        - None if valid internal API key is provided (service-to-service call)
+        - Raises HTTPException if neither is valid
+    
+    This allows endpoints to support both:
+    - User authentication (Bearer token)
+    - Internal service-to-service calls (X-Internal-API-Key header)
+    """
+    from api_core.config import get_settings
+    
+    settings = get_settings()
+    
+    # Check internal API key first
+    is_internal = False
+    if settings.internal_api_key_enabled and settings.internal_api_key:
+        is_internal = x_internal_api_key == settings.internal_api_key
+    
+    if is_internal:
+        # Internal service call - return None to indicate skip user authorization
+        return None
+    
+    # Otherwise, require user authentication
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated. Provide either a Bearer token or X-Internal-API-Key header.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    try:
+        validator = get_token_validator()
+        result = await validator.validate_token(token)
+        return result
+    except AuthenticationError as e:
+        logger.warning(f"Authentication failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during authentication: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
