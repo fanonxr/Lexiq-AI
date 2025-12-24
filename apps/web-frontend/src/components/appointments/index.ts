@@ -9,4 +9,5 @@ export { AppointmentList, type AppointmentListProps, type Appointment, type Appo
 export { AppointmentListSkeleton, type AppointmentListSkeletonProps } from "./AppointmentListSkeleton";
 export { AppointmentStatusBadge, type AppointmentStatusBadgeProps } from "./AppointmentStatusBadge";
 export { AppointmentCalendar, type AppointmentCalendarProps } from "./AppointmentCalendar";
+export { WeeklyCalendarView, type WeeklyCalendarViewProps } from "./WeeklyCalendarView";
 

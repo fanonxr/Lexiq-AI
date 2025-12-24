@@ -1,6 +1,8 @@
 """Knowledge base endpoints for file upload and management."""
 
 import logging
+import os
+import uuid
 from datetime import datetime
 from typing import Any, Dict
 from typing import Optional
@@ -20,11 +22,18 @@ from api_core.models.knowledge import (
     KnowledgeBaseFileResponse,
     QdrantInfoUpdateRequest,
 )
+from pydantic import BaseModel, Field
 from api_core.services.knowledge_service import get_knowledge_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+
+
+class KnowledgeBaseQueryRequest(BaseModel):
+    """Request model for knowledge base query."""
+    
+    query: str = Field(..., description="Query/question to ask the knowledge base")
 
 
 def _kb_file_to_response(kb_file) -> KnowledgeBaseFileResponse:
@@ -445,5 +454,123 @@ async def reindex_file(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while re-indexing the file",
+        ) from e
+
+
+@router.post(
+    "/query",
+    status_code=status.HTTP_200_OK,
+    summary="Query Knowledge Base",
+    description="Query the knowledge base using RAG (Retrieval-Augmented Generation).",
+)
+async def query_knowledge_base(
+    request: Request,
+    payload: KnowledgeBaseQueryRequest,
+    firm_id: Optional[str] = Query(None, description="Optional firm ID for scoped queries"),
+    current_user: TokenValidationResult = Depends(get_current_active_user),
+):
+    """
+    Query the knowledge base using RAG.
+    
+    This endpoint routes the query to the Cognitive Orchestrator service which:
+    1. Performs vector search in Qdrant to find relevant documents
+    2. Uses the retrieved context to generate an answer via LLM
+    3. Returns the answer along with source references
+    
+    Args:
+        query: The user's question/query
+        firm_id: Optional firm ID to scope the search to firm-specific documents
+        current_user: Current authenticated user
+        
+    Returns:
+        Response with answer, sources, and chat message format
+    """
+    try:
+        import httpx
+        from api_core.config import get_settings
+        
+        settings = get_settings()
+        
+        # Get Cognitive Orchestrator URL from config or environment
+        # Default to localhost:8001 if not configured
+        cognitive_orch_url = os.getenv(
+            "COGNITIVE_ORCH_URL",
+            "http://localhost:8001"
+        )
+        
+        # Use firm_id from user if available
+        user_firm_id = firm_id
+        if not user_firm_id:
+            # Try to get firm_id from user's profile
+            # For now, we'll pass None and let the orchestrator handle it
+            pass
+        
+        # Call Cognitive Orchestrator chat endpoint
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            chat_response = await client.post(
+                f"{cognitive_orch_url}/api/v1/orchestrator/chat",
+                json={
+                    "message": payload.query,
+                    "user_id": current_user.user_id,
+                    "firm_id": user_firm_id,
+                    "tools_enabled": False,  # Disable tools for simple RAG queries
+                    "temperature": 0.2,
+                },
+            )
+            
+            if chat_response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Cognitive Orchestrator returned error: {chat_response.text}",
+                )
+            
+            chat_data = chat_response.json()
+            
+            # Transform Cognitive Orchestrator response to frontend format
+            # Frontend expects: { answer: str, sources: string[], message: ChatMessage }
+            # Orchestrator returns: { conversation_id: str, response: str, tool_results: list, iterations: int }
+            
+            # Extract sources from tool_results if available
+            sources: list[str] = []
+            if chat_data.get("tool_results"):
+                for tool_result in chat_data["tool_results"]:
+                    if isinstance(tool_result, dict):
+                        # Look for source references in tool results
+                        if "sources" in tool_result:
+                            sources.extend(tool_result["sources"])
+                        elif "source" in tool_result:
+                            sources.append(tool_result["source"])
+            
+            # Create chat message format
+            from datetime import datetime
+            message = {
+                "id": str(uuid.uuid4()),
+                "role": "assistant",
+                "content": chat_data.get("response", ""),
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            
+            return {
+                "answer": chat_data.get("response", ""),
+                "sources": sources,
+                "message": message,
+            }
+            
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Cognitive Orchestrator request timed out",
+        )
+    except httpx.RequestError as e:
+        logger.error(f"Error calling Cognitive Orchestrator: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to connect to Cognitive Orchestrator",
+        ) from e
+    except Exception as e:
+        logger.error(f"Error querying knowledge base: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while querying the knowledge base",
         ) from e
 

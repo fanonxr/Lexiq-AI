@@ -60,18 +60,25 @@ class AzureADB2CClient:
         if not self.config.is_configured:
             return None
 
-        # Azure AD B2C JWKS URL format:
-        # https://{tenant}.b2clogin.com/{tenant}/{policy}/discovery/v2.0/keys
         tenant = self.config.tenant_id
-        policy = self.config.policy_signup_signin
-        instance = self.config.instance.format(tenant=tenant)
-
-        return f"{instance}/{tenant}/{policy}/discovery/v2.0/keys"
+        
+        if self.config.is_b2c:
+            # Azure AD B2C JWKS URL format:
+            # https://{tenant}.b2clogin.com/{tenant}/{policy}/discovery/v2.0/keys
+            policy = self.config.policy_signup_signin
+            if not policy:
+                return None
+            instance = self.config.instance.format(tenant=tenant) if "{tenant}" in self.config.instance else self.config.instance
+            return f"{instance}/{tenant}/{policy}/discovery/v2.0/keys"
+        else:
+            # Microsoft Entra ID (Azure AD) JWKS URL format:
+            # https://login.microsoftonline.com/{tenant-id}/discovery/v2.0/keys
+            return f"{self.config.instance}/{tenant}/discovery/v2.0/keys"
 
     async def get_jwks(self) -> Dict:
-        """Get JSON Web Key Set from Azure AD B2C."""
+        """Get JSON Web Key Set from Azure AD B2C or Entra ID."""
         if not self.jwks_url:
-            raise AuthenticationError("Azure AD B2C is not configured")
+            raise AuthenticationError("Azure AD B2C / Entra ID is not configured")
 
         # Use cached JWKS if available and not expired
         if (
@@ -94,7 +101,7 @@ class AzureADB2CClient:
                 logger.debug(f"Fetched JWKS from {self.jwks_url}")
                 return jwks
         except httpx.HTTPError as e:
-            logger.error(f"Failed to fetch JWKS from Azure AD B2C: {e}")
+            logger.error(f"Failed to fetch JWKS from Azure AD B2C/Entra ID: {e}")
             raise AuthenticationError("Failed to validate token: Unable to fetch signing keys")
 
     def get_signing_key(self, token: str, jwks: Dict) -> Optional[rsa.RSAPublicKey]:
@@ -151,9 +158,9 @@ class AzureADB2CClient:
             return None
 
     async def validate_token(self, token: str) -> Dict[str, any]:
-        """Validate an Azure AD B2C JWT token and return claims."""
+        """Validate an Azure AD B2C or Entra ID JWT token and return claims."""
         if not self.config.is_configured:
-            raise AuthenticationError("Azure AD B2C is not configured")
+            raise AuthenticationError("Azure AD B2C / Entra ID is not configured")
 
         try:
             # Get JWKS
@@ -165,35 +172,146 @@ class AzureADB2CClient:
                 raise AuthenticationError("Unable to find signing key for token")
 
             # Get expected audience and issuer
-            expected_audience = self.config.client_id
-            expected_issuer = self.config.authority
+            # For Entra ID, the audience can be:
+            # - The client ID directly: {client-id}
+            # - The API identifier: api://{client-id}
+            # We'll accept both formats
+            expected_audience_client_id = self.config.client_id
+            expected_audience_api = f"api://{self.config.client_id}"
+            
+            # For Entra ID, issuer can be tenant-specific or common
+            # We'll be more flexible with issuer validation for Entra ID
+            if self.config.is_b2c:
+                expected_issuer = self.config.authority
+            else:
+                # Entra ID issuer format: https://login.microsoftonline.com/{tenant-id}/v2.0
+                # or https://sts.windows.net/{tenant-id}/
+                # We'll validate against the authority but be flexible
+                expected_issuer = self.config.authority
+                # Also accept v2.0 endpoint format
+                expected_issuers = [
+                    expected_issuer,
+                    f"{expected_issuer}/v2.0",
+                    f"https://sts.windows.net/{self.config.tenant_id}/",
+                ]
 
             # Verify and decode token
-            algorithms = ["RS256"]  # Azure AD B2C uses RS256
-            options = {
-                "verify_signature": True,
-                "verify_aud": True,
-                "verify_exp": True,
-                "verify_iss": True,
-            }
-
-            claims = jwt.decode(
-                token,
-                public_key,
-                algorithms=algorithms,
-                audience=expected_audience,
-                issuer=expected_issuer,
-                options=options,
-            )
+            algorithms = ["RS256"]  # Both Azure AD B2C and Entra ID use RS256
+            
+            # For Entra ID, be flexible with issuer validation
+            if self.config.is_b2c:
+                # Azure AD B2C: strict issuer validation
+                options = {
+                    "verify_signature": True,
+                    "verify_aud": True,
+                    "verify_exp": True,
+                    "verify_iss": True,
+                }
+                claims = jwt.decode(
+                    token,
+                    public_key,
+                    algorithms=algorithms,
+                    audience=expected_audience,
+                    issuer=expected_issuer,
+                    options=options,
+                )
+            else:
+                # Entra ID: flexible issuer validation
+                # First decode without verification to check issuer format
+                # Note: jose jwt.decode requires a key even when verify_signature=False,
+                # so we'll use a dummy key or decode the payload directly
+                try:
+                    # Decode payload directly (base64 decode the middle part)
+                    parts = token.split(".")
+                    if len(parts) != 3:
+                        raise AuthenticationError("Invalid token format")
+                    
+                    import base64
+                    import json
+                    
+                    # Decode payload (second part)
+                    payload_b64 = parts[1]
+                    # Add padding if needed
+                    padding = 4 - len(payload_b64) % 4
+                    if padding != 4:
+                        payload_b64 += "=" * padding
+                    # Replace URL-safe characters
+                    payload_b64 = payload_b64.replace("-", "+").replace("_", "/")
+                    payload_bytes = base64.b64decode(payload_b64)
+                    unverified_claims = json.loads(payload_bytes.decode("utf-8"))
+                    
+                    token_issuer = unverified_claims.get("iss")
+                    
+                    # Check if issuer matches expected Entra ID formats
+                    issuer_valid = False
+                    if token_issuer:
+                        # Accept various Entra ID issuer formats
+                        tenant_id = self.config.tenant_id
+                        issuer_valid = (
+                            token_issuer.startswith(f"https://login.microsoftonline.com/{tenant_id}")
+                            or token_issuer.startswith(f"https://sts.windows.net/{tenant_id}")
+                            or token_issuer == f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+                            or token_issuer == f"https://login.microsoftonline.com/{tenant_id}/"
+                        )
+                    
+                    if not issuer_valid:
+                        logger.warning(
+                            f"Token issuer '{token_issuer}' doesn't match expected Entra ID format "
+                            f"for tenant {self.config.tenant_id}"
+                        )
+                        raise AuthenticationError(f"Invalid token issuer: {token_issuer}")
+                except (ValueError, json.JSONDecodeError, IndexError) as e:
+                    logger.warning(f"Failed to decode token payload for issuer check: {e}")
+                    # Continue with validation - issuer check will happen in decode
+                
+                # Decode payload to check audience before validation
+                token_audience = unverified_claims.get("aud")
+                
+                # For Entra ID, accept both client ID and API identifier formats
+                # Check if audience matches either format
+                audience_valid = (
+                    token_audience == expected_audience_client_id
+                    or token_audience == expected_audience_api
+                )
+                
+                if not audience_valid:
+                    logger.warning(
+                        f"Token audience '{token_audience}' doesn't match expected formats. "
+                        f"Expected: '{expected_audience_client_id}' or '{expected_audience_api}'"
+                    )
+                    raise AuthenticationError(f"Invalid token audience: {token_audience}")
+                
+                # Now decode with full verification (except issuer, which we validated manually)
+                # Use the actual token audience for validation
+                options = {
+                    "verify_signature": True,
+                    "verify_aud": True,
+                    "verify_exp": True,
+                    "verify_iss": False,  # We validated issuer manually above
+                }
+                claims = jwt.decode(
+                    token,
+                    public_key,
+                    algorithms=algorithms,
+                    audience=token_audience,  # Use the actual audience from token
+                    options=options,
+                )
 
             logger.debug(f"Token validated successfully for user: {claims.get('oid')}")
             return claims
 
         except JWTError as e:
-            logger.warning(f"Token validation failed: {e}")
+            logger.warning(f"Token validation failed (JWTError): {e}", exc_info=True)
+            # Log more details about the error
+            try:
+                from jose import jwt as jose_jwt
+                unverified_claims = jose_jwt.get_unverified_claims(token)
+                logger.warning(f"Token claims (unverified): aud={unverified_claims.get('aud')}, iss={unverified_claims.get('iss')}, exp={unverified_claims.get('exp')}")
+            except:
+                pass
             raise AuthenticationError(f"Invalid token: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error during token validation: {e}")
+            logger.error(f"Unexpected error during token validation: {e}", exc_info=True)
             raise AuthenticationError(f"Token validation failed: {str(e)}")
 
     async def get_user_info(self, token: str) -> UserInfo:

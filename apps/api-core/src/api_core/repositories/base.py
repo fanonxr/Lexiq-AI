@@ -90,8 +90,9 @@ class BaseRepository(Generic[ModelType]):
         try:
             instance = self.model(**kwargs)
             self.session.add(instance)
-            await self.session.flush()  # Flush to get the ID
-            await self.session.refresh(instance)
+            await self.session.flush()  # Flush to get the ID and trigger any defaults
+            # Don't refresh - it can cause async issues with relationships
+            # The instance already has the ID after flush
             logger.debug(f"Created {self.model.__name__} with ID: {instance.id}")
             return instance
         except SQLAlchemyError as e:

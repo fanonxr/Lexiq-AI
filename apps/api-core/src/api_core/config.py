@@ -70,32 +70,65 @@ class RabbitMQSettings(BaseSettings):
 
 
 class AzureADB2CSettings(BaseSettings):
-    """Azure AD B2C configuration."""
+    """Azure AD B2C / Microsoft Entra ID configuration.
+    
+    Supports both:
+    - Azure AD B2C: Uses b2clogin.com and requires policy
+    - Microsoft Entra ID (Azure AD): Uses login.microsoftonline.com, no policy needed
+    """
 
     model_config = SettingsConfigDict(env_prefix="AZURE_AD_B2C_", case_sensitive=False)
 
-    tenant_id: Optional[str] = Field(default=None, description="Azure AD B2C tenant ID")
-    client_id: Optional[str] = Field(default=None, description="Azure AD B2C client ID")
-    client_secret: Optional[str] = Field(default=None, description="Azure AD B2C client secret")
+    tenant_id: Optional[str] = Field(default=None, description="Azure AD B2C / Entra ID tenant ID")
+    client_id: Optional[str] = Field(default=None, description="Azure AD B2C / Entra ID client ID")
+    client_secret: Optional[str] = Field(default=None, description="Azure AD B2C client secret (optional)")
     policy_signup_signin: Optional[str] = Field(
-        default=None, description="Azure AD B2C sign-up/sign-in policy name"
+        default=None, description="Azure AD B2C sign-up/sign-in policy name (only needed for B2C, not Entra ID)"
     )
     instance: str = Field(
-        default="https://{tenant}.b2clogin.com",
-        description="Azure AD B2C instance URL template",
+        default="https://login.microsoftonline.com",
+        description="Instance URL. For Entra ID: 'https://login.microsoftonline.com'. For B2C: 'https://{tenant}.b2clogin.com'",
     )
+    use_b2c: bool = Field(
+        default=False,
+        description="Whether to use Azure AD B2C (True) or Entra ID (False). Auto-detected if policy is provided.",
+    )
+
+    @property
+    def is_b2c(self) -> bool:
+        """Determine if using Azure AD B2C based on instance URL or policy."""
+        if self.use_b2c:
+            return True
+        if self.policy_signup_signin:
+            return True
+        # Check if instance contains b2clogin.com
+        return "b2clogin.com" in self.instance.lower()
 
     @property
     def authority(self) -> Optional[str]:
-        """Get the authority URL for Azure AD B2C."""
-        if not self.tenant_id or not self.policy_signup_signin:
+        """Get the authority URL for Azure AD B2C or Entra ID."""
+        if not self.tenant_id:
             return None
-        return f"{self.instance.format(tenant=self.tenant_id)}/{self.tenant_id}/{self.policy_signup_signin}"
+        
+        if self.is_b2c:
+            # Azure AD B2C format: https://{tenant}.b2clogin.com/{tenant}/{policy}
+            if not self.policy_signup_signin:
+                return None
+            instance_url = self.instance.format(tenant=self.tenant_id) if "{tenant}" in self.instance else self.instance
+            return f"{instance_url}/{self.tenant_id}/{self.policy_signup_signin}"
+        else:
+            # Entra ID format: https://login.microsoftonline.com/{tenant-id}
+            return f"{self.instance}/{self.tenant_id}"
 
     @property
     def is_configured(self) -> bool:
-        """Check if Azure AD B2C is properly configured."""
-        return bool(self.tenant_id and self.client_id and self.policy_signup_signin)
+        """Check if Azure AD B2C or Entra ID is properly configured."""
+        if not self.tenant_id or not self.client_id:
+            return False
+        # For B2C, policy is required. For Entra ID, it's not.
+        if self.is_b2c:
+            return bool(self.policy_signup_signin)
+        return True  # Entra ID only needs tenant_id and client_id
 
 
 class AzureKeyVaultSettings(BaseSettings):
@@ -115,31 +148,39 @@ class AzureKeyVaultSettings(BaseSettings):
 class StorageSettings(BaseSettings):
     """Azure Blob Storage configuration for knowledge base files."""
 
-    model_config = SettingsConfigDict(env_prefix="STORAGE_", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_prefix="STORAGE_", 
+        case_sensitive=False,
+        # pydantic-settings uses field names (not aliases) for env var lookup
+        # With env_prefix="STORAGE_" and case_sensitive=False:
+        # - Field "connection_string" looks for: STORAGE_connection_string, STORAGE_CONNECTION_STRING, etc.
+        # - Field "account_name" looks for: STORAGE_account_name, STORAGE_ACCOUNT_NAME, etc.
+        populate_by_name=True,  # Allow both field name and alias for JSON/dict input
+    )
 
     account_name: Optional[str] = Field(
-        default=None, description="Azure Storage Account name", alias="ACCOUNT_NAME"
+        default=None, 
+        description="Azure Storage Account name",
+        # Alias for JSON/dict serialization, env var is STORAGE_ACCOUNT_NAME (case-insensitive)
     )
     account_key: Optional[str] = Field(
-        default=None, description="Azure Storage Account key (use Managed Identity instead)", alias="ACCOUNT_KEY"
+        default=None, 
+        description="Azure Storage Account key (use Managed Identity instead)",
     )
     connection_string: Optional[str] = Field(
         default=None,
         description="Azure Storage connection string (use Managed Identity instead)",
-        alias="CONNECTION_STRING",
     )
     use_managed_identity: bool = Field(
-        default=True,
-        description="Use Managed Identity for authentication (recommended)",
-        alias="USE_MANAGED_IDENTITY",
+        default=False,  # Changed default to False for local development
+        description="Use Managed Identity for authentication (recommended for production)",
     )
     max_file_size_mb: int = Field(
-        default=100, description="Maximum file size in MB", alias="MAX_FILE_SIZE_MB"
+        default=100, description="Maximum file size in MB"
     )
     allowed_file_types: List[str] = Field(
         default_factory=lambda: ["pdf", "docx", "txt", "md"],
         description="Allowed file types for upload",
-        alias="ALLOWED_FILE_TYPES",
     )
 
     @property
@@ -194,19 +235,16 @@ class CorsSettings(BaseSettings):
     # Store as strings to avoid JSON parsing issues
     origins_str: str = Field(
         default="http://localhost:3000",
-        alias="origins",
-        description="Allowed CORS origins (comma-separated string)",
+        description="Allowed CORS origins (comma-separated string). Env var: CORS_origins",
     )
     allow_credentials: bool = Field(default=True, description="Allow credentials in CORS")
     allow_methods_str: str = Field(
         default="GET,POST,PUT,DELETE,OPTIONS,PATCH",
-        alias="allow_methods",
-        description="Allowed HTTP methods (comma-separated string)",
+        description="Allowed HTTP methods (comma-separated string). Env var: CORS_allow_methods",
     )
     allow_headers_str: str = Field(
         default="*",
-        alias="allow_headers",
-        description="Allowed HTTP headers (comma-separated string)",
+        description="Allowed HTTP headers (comma-separated string). Env var: CORS_allow_headers",
     )
     max_age: int = Field(default=3600, description="CORS preflight cache max age in seconds")
 
@@ -240,6 +278,12 @@ class Settings(BaseSettings):
     """Application settings."""
 
     model_config = SettingsConfigDict(
+        # Note: In Docker, env_file is loaded by docker-compose.yml
+        # For local development, pydantic-settings will look for .env in the current working directory
+        # The env_file path is relative to where the Python process runs (inside container: /app)
+        # Docker Compose loads apps/api-core/.env and makes variables available as environment variables
+        # So we don't need to specify env_file here - environment variables take precedence
+        # However, we can also explicitly load from .env file as a fallback
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
@@ -260,13 +304,11 @@ class Settings(BaseSettings):
     # Internal service-to-service auth (protect internal endpoints)
     internal_api_key_enabled: bool = Field(
         default=False,
-        description="Enable API-key auth for internal service endpoints",
-        alias="INTERNAL_API_KEY_ENABLED",
+        description="Enable API-key auth for internal service endpoints. Env var: INTERNAL_API_KEY_ENABLED",
     )
     internal_api_key: Optional[str] = Field(
         default=None,
-        description="Shared secret API key for internal services (sent as X-Internal-API-Key)",
-        alias="INTERNAL_API_KEY",
+        description="Shared secret API key for internal services (sent as X-Internal-API-Key). Env var: INTERNAL_API_KEY",
     )
 
     # Sub-settings
@@ -397,7 +439,31 @@ def get_settings() -> Settings:
     """Get the global settings instance."""
     global _settings
     if _settings is None:
+        import logging
+        import os
+        logger = logging.getLogger(__name__)
+        
+        # Debug: Log storage-related environment variables
+        storage_env_vars = {k: v for k, v in os.environ.items() if k.startswith("STORAGE_")}
+        if storage_env_vars:
+            logger.debug(f"Storage environment variables found: {list(storage_env_vars.keys())}")
+            # Log connection string preview (first 50 chars) for debugging
+            if "STORAGE_CONNECTION_STRING" in storage_env_vars:
+                conn_str = storage_env_vars["STORAGE_CONNECTION_STRING"]
+                logger.debug(f"STORAGE_CONNECTION_STRING length: {len(conn_str)}, preview: {conn_str[:50]}...")
+        else:
+            logger.warning("No STORAGE_* environment variables found")
+        
         _settings = Settings()
+        
+        # Debug: Log what was actually loaded
+        logger.debug(
+            f"Storage settings loaded - "
+            f"account_name: {bool(_settings.storage.account_name)}, "
+            f"connection_string: {bool(_settings.storage.connection_string)}, "
+            f"use_managed_identity: {_settings.storage.use_managed_identity}"
+        )
+        
         # Load secrets from Key Vault if configured
         if _settings.azure_key_vault.is_configured:
             _settings.load_secrets_from_key_vault()
@@ -405,11 +471,20 @@ def get_settings() -> Settings:
         try:
             _settings.validate_production_settings()
         except ValueError as e:
-            import logging
-
             logging.error(f"Configuration validation failed: {e}")
             if _settings.is_production:
                 raise  # Fail fast in production
+        
+        # Log Azure AD configuration status for debugging
+        if _settings.azure_ad_b2c.is_configured:
+            auth_type = "Azure AD B2C" if _settings.azure_ad_b2c.is_b2c else "Microsoft Entra ID"
+            logger.info(f"{auth_type} is configured: tenant_id={_settings.azure_ad_b2c.tenant_id[:8]}..., client_id={_settings.azure_ad_b2c.client_id[:8]}...")
+        else:
+            logger.warning(
+                f"Azure AD / Entra ID is not configured. "
+                f"tenant_id={'set' if _settings.azure_ad_b2c.tenant_id else 'missing'}, "
+                f"client_id={'set' if _settings.azure_ad_b2c.client_id else 'missing'}"
+            )
     return _settings
 
 

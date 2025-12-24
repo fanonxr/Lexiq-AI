@@ -35,7 +35,7 @@ import {
 } from "@/lib/auth/msalConfig";
 import { AuthContext } from "@/contexts/AuthContext";
 import type { AuthContextValue, UserProfile } from "@/types/auth";
-import { removeAllTokens, getAuthToken } from "@/lib/api/client";
+import { removeAllTokens, getAuthToken, setTokenGetter } from "@/lib/api/client";
 import {
   loginWithEmailPassword,
   signupWithEmailPassword,
@@ -80,6 +80,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [emailAuthUser, setEmailAuthUser] = useState<UserProfile | null>(null);
   const [isProcessingRedirect, setIsProcessingRedirect] = useState(true);
+  const [isAcquiringToken, setIsAcquiringToken] = useState(false); // Prevent multiple simultaneous token requests
 
   /**
    * Handle redirect promise - CRITICAL for redirect flow
@@ -165,10 +166,277 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
   );
 
   /**
+   * Get access token for API calls
+   * Defined early so it can be used in other hooks
+   * 
+   * Note: For backend API calls, we don't pass scopes - tokenRequest()
+   * will use the backend's client ID as the scope automatically.
+   */
+  const getAccessToken = useCallback(
+    async (scopes?: string[]): Promise<string | null> => {
+      if (!account) {
+        return null;
+      }
+
+      // Prevent multiple simultaneous token acquisition requests
+      if (isAcquiringToken) {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[AuthProvider] Token acquisition already in progress, skipping...");
+        }
+        return null;
+      }
+
+      try {
+        setIsAcquiringToken(true);
+        setError(null);
+        
+        // Request token for backend API (no scopes = uses backend client ID)
+        const request = tokenRequest(scopes);
+        
+        if (process.env.NODE_ENV === "development") {
+          console.log("[AuthProvider] Requesting token with scopes:", request.scopes);
+        }
+        
+        const response: AuthenticationResult | null =
+          await instance.acquireTokenSilent({
+            ...request,
+            account: account,
+          });
+
+        if (process.env.NODE_ENV === "development" && response) {
+          console.log("[AuthProvider] Token acquired successfully:", {
+            hasToken: !!response.accessToken,
+            tokenLength: response.accessToken?.length || 0,
+            scopes: response.scopes,
+          });
+        }
+
+        setIsAcquiringToken(false);
+        return response?.accessToken || null;
+      } catch (err: any) {
+        // Check if this is a consent error
+        const isConsentError = err?.errorCode === "consent_required" || 
+                              err?.errorCode === "interaction_required" ||
+                              err?.message?.includes("consent") ||
+                              err?.message?.includes("AADSTS65001");
+
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[AuthProvider] Silent token acquisition failed:", {
+            errorCode: err?.errorCode,
+            errorMessage: err?.message,
+            isConsentError,
+          });
+        }
+
+        // If it's a consent error, we need admin consent in Azure Portal
+        // However, for same app registration, we might need to expose an API first
+        // Try interactive popup once to see if user consent helps, but don't loop
+        if (isConsentError) {
+          // Check if we've already tried interactive - if so, don't try again
+          const hasTriedInteractive = sessionStorage.getItem("auth_consent_tried") === "true";
+          
+          if (!hasTriedInteractive) {
+            // Mark that we've tried interactive
+            sessionStorage.setItem("auth_consent_tried", "true");
+            
+            // Try interactive popup once
+            try {
+              if (process.env.NODE_ENV === "development") {
+                console.log("[AuthProvider] Consent error detected, trying interactive popup once...");
+              }
+              
+              const request = tokenRequest(scopes);
+              const response: AuthenticationResult | null =
+                await instance.acquireTokenPopup({
+                  ...request,
+                  account: account,
+                  prompt: "consent", // Force consent prompt
+                });
+
+              // If successful, clear the flag
+              if (response?.accessToken) {
+                sessionStorage.removeItem("auth_consent_tried");
+                setIsAcquiringToken(false);
+                return response.accessToken;
+              }
+            } catch (popupErr) {
+              // Popup failed, continue to show error
+              console.warn("[AuthProvider] Interactive popup also failed:", popupErr);
+            }
+          }
+          
+          // Show error message
+          setIsAcquiringToken(false);
+          const error = new Error(
+            "Consent is required. If you've already granted admin consent, you may need to:\n" +
+            "1. Expose an API in Azure Portal (App registrations → Expose an API)\n" +
+            "2. Set Application ID URI to: api://1fabcd74-ddc8-45ae-a7ed-fe017ae6b5ce\n" +
+            "3. Grant admin consent again\n" +
+            "4. Wait 1-2 minutes for changes to propagate\n" +
+            "See /docs/connection/AZURE_AD_SETUP.md for detailed instructions."
+          );
+          setError(error);
+          console.error("[AuthProvider] Consent required - check Azure Portal configuration");
+          return null;
+        }
+
+        // For other errors, try interactive popup (but only once)
+        try {
+          if (process.env.NODE_ENV === "development") {
+            console.log("[AuthProvider] Attempting interactive token acquisition...");
+          }
+          
+          const request = tokenRequest(scopes);
+          const response: AuthenticationResult | null =
+            await instance.acquireTokenPopup({
+              ...request,
+              account: account,
+            });
+
+          setIsAcquiringToken(false);
+          return response?.accessToken || null;
+        } catch (interactiveErr: any) {
+          setIsAcquiringToken(false);
+          
+          // Check if this is also a consent error
+          const isInteractiveConsentError = interactiveErr?.errorCode === "consent_required" || 
+                                            interactiveErr?.errorCode === "interaction_required" ||
+                                            interactiveErr?.message?.includes("consent") ||
+                                            interactiveErr?.message?.includes("AADSTS65001");
+
+          if (isInteractiveConsentError) {
+            const error = new Error(
+              "Admin consent is required. Please ask your administrator to grant consent in Azure Portal. " +
+              "See /docs/connection/GRANT_CONSENT_QUICK.md for instructions."
+            );
+            setError(error);
+            console.error("[AuthProvider] Consent required after interactive attempt");
+            return null;
+          }
+
+          const error =
+            interactiveErr instanceof Error
+              ? interactiveErr
+              : new Error("Failed to acquire token");
+          setError(error);
+          console.error("[AuthProvider] Interactive token acquisition failed:", error);
+          return null;
+        }
+      }
+    },
+    [instance, account, isAcquiringToken]
+  );
+
+  /**
+   * Set up token getter for API client
+   * This allows the API client to get MSAL tokens
+   */
+  useEffect(() => {
+    if (account) {
+      // Set token getter to use MSAL
+      const tokenGetter = async () => {
+        try {
+          if (process.env.NODE_ENV === "development") {
+            console.log("[AuthProvider] Token getter called, requesting token...", {
+              accountId: account.homeAccountId,
+              accountName: account.name,
+              hasInstance: !!instance,
+              isAcquiringToken,
+            });
+          }
+          
+          // If token acquisition is already in progress, wait a bit and try again
+          if (isAcquiringToken) {
+            console.warn("[AuthProvider] Token acquisition in progress, waiting 500ms...");
+            await new Promise(resolve => setTimeout(resolve, 500));
+            // Try again after waiting
+            if (isAcquiringToken) {
+              console.warn("[AuthProvider] Still acquiring token, using direct MSAL call");
+              // Bypass getAccessToken and call MSAL directly
+              const silentRequest = tokenRequest();
+              const result = await instance.acquireTokenSilent({
+                ...silentRequest,
+                account: account,
+              });
+              if (result?.accessToken) {
+                console.log("[AuthProvider] Direct MSAL token acquisition successful");
+                return result.accessToken;
+              }
+              return null;
+            }
+          }
+          
+          // Call getAccessToken to get a fresh token
+          const token = await getAccessToken();
+          
+          if (!token) {
+            console.warn("[AuthProvider] getAccessToken returned null/undefined, trying direct MSAL call");
+            // Try to get token directly from instance as fallback
+            try {
+              const silentRequest = tokenRequest();
+              const result = await instance.acquireTokenSilent({
+                ...silentRequest,
+                account: account,
+              });
+              if (result?.accessToken) {
+                if (process.env.NODE_ENV === "development") {
+                  console.log("[AuthProvider] Fallback token acquisition successful");
+                }
+                return result.accessToken;
+              } else {
+                console.error("[AuthProvider] Fallback MSAL call returned no token");
+              }
+            } catch (fallbackError: any) {
+              console.error("[AuthProvider] Fallback token acquisition failed:", {
+                errorCode: fallbackError?.errorCode,
+                errorMessage: fallbackError?.message,
+                error: fallbackError,
+              });
+            }
+            return null;
+          }
+          
+          if (process.env.NODE_ENV === "development") {
+            console.log("[AuthProvider] Token retrieved for API client:", {
+              hasToken: !!token,
+              tokenLength: token?.length || 0,
+              accountId: account.homeAccountId,
+            });
+          }
+          return token;
+        } catch (error: any) {
+          console.error("[AuthProvider] Failed to get access token in token getter:", {
+            errorCode: error?.errorCode,
+            errorMessage: error?.message,
+            error: error,
+          });
+          return null;
+        }
+      };
+      
+      setTokenGetter(tokenGetter);
+      if (process.env.NODE_ENV === "development") {
+        console.log("[AuthProvider] Token getter set for account:", account.homeAccountId);
+      }
+    } else {
+      // Clear token getter if no account
+      setTokenGetter(null);
+      if (process.env.NODE_ENV === "development") {
+        console.log("[AuthProvider] Token getter cleared (no account)");
+      }
+    }
+
+    // Cleanup on unmount
+    return () => {
+      setTokenGetter(null);
+    };
+  }, [account, getAccessToken]);
+
+  /**
    * Check for email/password authentication token on mount
    */
   useEffect(() => {
-    // Check if we have an email auth token
+    // Check if we have an email auth token (synchronous check)
     const token = getAuthToken();
     if (token && !account) {
       // Token exists but no MSAL account - user is authenticated via email/password
@@ -203,7 +471,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
     // 2. We're still processing a redirect callback
     const isProcessing = inProgress !== "none";
     
-    // Check for email auth token
+    // Check for email auth token (synchronous check)
     const hasEmailAuth = getAuthToken() !== null;
     
     // If we have email auth but no MSAL account, we're authenticated via email
@@ -305,50 +573,6 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     }
   }, [instance, account]);
-
-  /**
-   * Get access token for API calls
-   */
-  const getAccessToken = useCallback(
-    async (scopes: string[] = ["User.Read"]): Promise<string | null> => {
-      if (!account) {
-        return null;
-      }
-
-      try {
-        setError(null);
-        
-        const request = tokenRequest(scopes);
-        const response: AuthenticationResult | null =
-          await instance.acquireTokenSilent({
-            ...request,
-            account: account,
-          });
-
-        return response?.accessToken || null;
-      } catch (err) {
-        // If silent token acquisition fails, try interactive
-        try {
-          const request = tokenRequest(scopes);
-          const response: AuthenticationResult | null =
-            await instance.acquireTokenPopup({
-              ...request,
-              account: account,
-            });
-
-          return response?.accessToken || null;
-        } catch (interactiveErr) {
-          const error =
-            interactiveErr instanceof Error
-              ? interactiveErr
-              : new Error("Failed to acquire token");
-          setError(error);
-          return null;
-        }
-      }
-    },
-    [instance, account]
-  );
 
   /**
    * Clear authentication error

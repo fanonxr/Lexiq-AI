@@ -8,6 +8,7 @@ import { TestPlayground } from "@/components/agent/TestPlayground";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAgentConfig, useUpdateAgentConfig, useVoiceOptions, useTestCall, useImproveScript } from "@/hooks/useAgent";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
@@ -30,138 +31,111 @@ export const dynamic = "force-dynamic";
  * - Test playground for testing configuration
  */
 export default function AgentPage() {
-  // Voice selection
+  // Fetch agent config and voice options
+  const { data: config, isLoading: configLoading, error: configError, refetch: refetchConfig } = useAgentConfig();
+  const { data: voiceOptions = [], isLoading: voicesLoading } = useVoiceOptions();
+  const { mutate: updateConfig, isLoading: isUpdating } = useUpdateAgentConfig();
+  const { mutate: testCall, isLoading: isCalling } = useTestCall();
+  const { mutate: improveScript, isLoading: isImproving } = useImproveScript();
+
+  // Local state (initialized from config when loaded)
   const [selectedVoice, setSelectedVoice] = useState<string>("1");
-
-  // Scripting inputs
-  const [greetingScript, setGreetingScript] = useState(
-    "Hello, thank you for calling. How can I assist you today?"
-  );
-  const [closingScript, setClosingScript] = useState(
-    "Thank you for calling. Have a great day!"
-  );
-  const [transferScript, setTransferScript] = useState(
-    "Let me transfer you to someone who can better assist you."
-  );
-
-  // Behavior toggles
+  const [greetingScript, setGreetingScript] = useState("Hello, thank you for calling. How can I assist you today?");
+  const [closingScript, setClosingScript] = useState("Thank you for calling. Have a great day!");
+  const [transferScript, setTransferScript] = useState("Let me transfer you to someone who can better assist you.");
   const [autoRespond, setAutoRespond] = useState(false);
   const [recordCalls, setRecordCalls] = useState(true);
   const [autoTranscribe, setAutoTranscribe] = useState(true);
   const [enableVoicemail, setEnableVoicemail] = useState(true);
 
   // Auto-save state
-  const [isSaving, setIsSaving] = useState(false);
   const [showSavedIndicator, setShowSavedIndicator] = useState(false);
 
-  // Test call state
-  const [isCalling, setIsCalling] = useState(false);
-
-  // Mock voice options
-  const voiceOptions: VoiceOption[] = [
-    {
-      id: "1",
-      name: "Professional",
-      icon: "user",
-      description: "Clear and professional tone",
-      previewUrl: "/audio/voice-professional.mp3",
-    },
-    {
-      id: "2",
-      name: "Friendly",
-      icon: "mic",
-      description: "Warm and approachable",
-      previewUrl: "/audio/voice-friendly.mp3",
-    },
-    {
-      id: "3",
-      name: "Assistant",
-      icon: "user",
-      description: "Neutral and helpful",
-      previewUrl: "/audio/voice-assistant.mp3",
-    },
-    {
-      id: "4",
-      name: "Executive",
-      icon: "user",
-      description: "Confident and authoritative",
-      previewUrl: "/audio/voice-executive.mp3",
-    },
-  ];
+  // Initialize state from config when loaded
+  useEffect(() => {
+    if (config) {
+      setSelectedVoice(config.voiceId || "1");
+      setGreetingScript(config.greetingScript || "Hello, thank you for calling. How can I assist you today?");
+      setClosingScript(config.closingScript || "Thank you for calling. Have a great day!");
+      setTransferScript(config.transferScript || "Let me transfer you to someone who can better assist you.");
+      setAutoRespond(config.autoRespond ?? false);
+      setRecordCalls(config.recordCalls ?? true);
+      setAutoTranscribe(config.autoTranscribe ?? true);
+      setEnableVoicemail(config.enableVoicemail ?? true);
+    }
+  }, [config]);
 
   // Auto-save functionality (debounced)
   useEffect(() => {
+    // Skip auto-save if config is still loading or if this is the initial load
+    if (configLoading || !config) {
+      return;
+    }
+
     // Debounce auto-save
     const timer = setTimeout(() => {
-      if (greetingScript || closingScript || transferScript) {
-        handleAutoSave();
-      }
+      handleAutoSave();
     }, 2000); // 2 second debounce
 
     return () => clearTimeout(timer);
-  }, [greetingScript, closingScript, transferScript, selectedVoice, autoRespond, recordCalls, autoTranscribe, enableVoicemail]);
+  }, [greetingScript, closingScript, transferScript, selectedVoice, autoRespond, recordCalls, autoTranscribe, enableVoicemail, configLoading, config]);
 
   const handleAutoSave = useCallback(async () => {
-    setIsSaving(true);
-    
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    
-    // Mock save - in real implementation, this would call the API
-    console.log("Auto-saving agent configuration:", {
-      selectedVoice,
-      greetingScript,
-      closingScript,
-      transferScript,
-      autoRespond,
-      recordCalls,
-      autoTranscribe,
-      enableVoicemail,
-    });
-
-    setIsSaving(false);
-    setShowSavedIndicator(true);
-
-    // Hide saved indicator after 2 seconds
-    setTimeout(() => {
-      setShowSavedIndicator(false);
-    }, 2000);
-  }, [selectedVoice, greetingScript, closingScript, transferScript, autoRespond, recordCalls, autoTranscribe, enableVoicemail]);
+    try {
+      await updateConfig({
+        voiceId: selectedVoice,
+        greetingScript,
+        closingScript,
+        transferScript,
+        autoRespond,
+        recordCalls,
+        autoTranscribe,
+        enableVoicemail,
+      });
+      
+      setShowSavedIndicator(true);
+      setTimeout(() => {
+        setShowSavedIndicator(false);
+      }, 2000);
+    } catch (error) {
+      console.error("Failed to save agent configuration:", error);
+    }
+  }, [selectedVoice, greetingScript, closingScript, transferScript, autoRespond, recordCalls, autoTranscribe, enableVoicemail, updateConfig]);
 
   const handleImproveGreeting = async () => {
-    // Mock AI improvement
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setGreetingScript(
-      "Hello, thank you for calling [Company Name]. My name is [AI Name], and I'm here to help you today. How can I assist you?"
-    );
+    try {
+      const improved = await improveScript({ script: greetingScript, scriptType: "greeting" });
+      setGreetingScript(improved);
+    } catch (error) {
+      console.error("Failed to improve greeting script:", error);
+    }
   };
 
   const handleImproveClosing = async () => {
-    // Mock AI improvement
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setClosingScript(
-      "Thank you for calling [Company Name]. We appreciate your time today. If you have any further questions, please don't hesitate to reach out. Have a wonderful day!"
-    );
+    try {
+      const improved = await improveScript({ script: closingScript, scriptType: "closing" });
+      setClosingScript(improved);
+    } catch (error) {
+      console.error("Failed to improve closing script:", error);
+    }
   };
 
   const handleImproveTransfer = async () => {
-    // Mock AI improvement
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setTransferScript(
-      "I understand you'd like to speak with someone who can provide more specialized assistance. Let me transfer you to the right person who can help you with that."
-    );
+    try {
+      const improved = await improveScript({ script: transferScript, scriptType: "transfer" });
+      setTransferScript(improved);
+    } catch (error) {
+      console.error("Failed to improve transfer script:", error);
+    }
   };
 
   const handleTestCall = async (phoneNumber: string) => {
-    setIsCalling(true);
-    // Mock test call - in real implementation, this would call the API
-    console.log("Initiating test call to:", phoneNumber);
-    
-    // Simulate call initiation
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    setIsCalling(false);
-    // In real implementation, you might show a success message or handle the call result
+    try {
+      await testCall(phoneNumber);
+      // Success message could be shown here
+    } catch (error) {
+      console.error("Failed to initiate test call:", error);
+    }
   };
 
   return (
@@ -184,8 +158,11 @@ export default function AgentPage() {
             <span>Saved</span>
           </div>
         )}
-        {isSaving && !showSavedIndicator && (
+        {(isUpdating || configLoading) && !showSavedIndicator && (
           <div className="text-sm text-muted-foreground">Saving...</div>
+        )}
+        {configError && (
+          <div className="text-sm text-red-600">Failed to load configuration</div>
         )}
       </div>
 
@@ -200,11 +177,15 @@ export default function AgentPage() {
               <CardTitle className="text-base font-semibold">Voice Selection</CardTitle>
             </CardHeader>
             <CardContent>
-              <VoiceLabGrid
-                voices={voiceOptions}
-                selectedVoice={selectedVoice}
-                onVoiceSelect={setSelectedVoice}
-              />
+              {voicesLoading ? (
+                <div className="text-sm text-muted-foreground p-4">Loading voices...</div>
+              ) : (
+                <VoiceLabGrid
+                  voices={voiceOptions || []}
+                  selectedVoice={selectedVoice}
+                  onVoiceSelect={setSelectedVoice}
+                />
+              )}
             </CardContent>
           </Card>
 

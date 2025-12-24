@@ -5,9 +5,12 @@ from typing import List, Optional
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.requests import Request
 
 from api_core.auth.token_validator import TokenValidationResult, get_token_validator
+from api_core.database.session import get_session_context
 from api_core.exceptions import AuthenticationError, AuthorizationError
+from api_core.services.user_service import get_user_service
 
 logger = logging.getLogger(__name__)
 
@@ -20,56 +23,147 @@ async def get_token_from_header(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Optional[str]:
     """Extract token from Authorization header."""
+    # Debug logging
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"Token extraction - has_credentials: {credentials is not None}, has_authorization_header: {authorization is not None}")
+    
     # Try HTTPBearer first (standard Bearer token)
     if credentials:
-        return credentials.credentials
+        token = credentials.credentials
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Token extracted from HTTPBearer: {token[:20] + '...' if token and len(token) > 20 else token}")
+        return token
 
     # Fallback: try manual header parsing
     if authorization:
         # Handle "Bearer <token>" format
         if authorization.startswith("Bearer "):
-            return authorization[7:].strip()
+            token = authorization[7:].strip()
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Token extracted from Bearer header: {token[:20] + '...' if token and len(token) > 20 else token}")
+            return token
         # Handle plain token
-        return authorization.strip()
+        token = authorization.strip()
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Token extracted from plain header: {token[:20] + '...' if token and len(token) > 20 else token}")
+        return token
 
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("No token found in headers")
     return None
 
 
 async def get_current_user(
+    request: Request,
     token: Optional[str] = Depends(get_token_from_header),
 ) -> TokenValidationResult:
     """
     FastAPI dependency to get the current authenticated user.
 
-    Validates the token (either Azure AD B2C or internal JWT) and returns
-    the user information.
+    Validates the token (either Azure AD B2C/Entra ID or internal JWT) and returns
+    the user information. For Azure AD users, automatically syncs the user to the
+    database if they don't exist yet.
 
     Raises:
         HTTPException: 401 if token is missing or invalid
     """
     if not token:
+        # Log all headers for debugging (but don't log sensitive data)
+        headers_dict = dict(request.headers)
+        # Remove potentially sensitive headers
+        safe_headers = {k: v for k, v in headers_dict.items() if k.lower() not in ['authorization', 'cookie', 'x-api-key']}
+        logger.warning(
+            f"get_current_user called but no token provided. "
+            f"Request: {request.method} {request.url.path}. "
+            f"Headers present: {list(safe_headers.keys())}"
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+            detail="Not authenticated: No token provided. Please ensure you are logged in and the Authorization header is included in your request.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     try:
+        logger.debug(f"Validating token (length: {len(token)}, preview: {token[:20]}...)")
         validator = get_token_validator()
         result = await validator.validate_token(token)
+        logger.debug(f"Token validated successfully for user: {result.user_id} ({result.email})")
+        
+        # Auto-sync Azure AD users to database
+        if result.token_type == "azure_ad_b2c" and result.user_info:
+            try:
+                async with get_session_context() as session:
+                    user_service = get_user_service(session)
+                    
+                    # Check if user exists in database by Azure AD object ID
+                    azure_ad_object_id = result.user_info.oid
+                    if azure_ad_object_id:
+                        existing_user = await user_service.repository.get_by_azure_ad_object_id(
+                            azure_ad_object_id
+                        )
+                        
+                        if not existing_user:
+                            # User doesn't exist in database, sync them
+                            logger.info(
+                                f"Auto-syncing Azure AD user to database: {result.email} "
+                                f"(object_id: {azure_ad_object_id})"
+                            )
+                            
+                            # Extract user info from token
+                            email = result.user_info.email or result.email
+                            name = result.user_info.display_name or result.user_info.name or email.split("@")[0]
+                            tenant_id = result.user_info.tenant_id
+                            
+                            # Sync user from Azure AD
+                            user_profile = await user_service.sync_user_from_azure_ad(
+                                azure_ad_object_id=azure_ad_object_id,
+                                email=email,
+                                name=name,
+                                azure_ad_tenant_id=tenant_id,
+                            )
+                            
+                            # Update result to use database user ID instead of Azure AD object ID
+                            # This ensures subsequent lookups work correctly
+                            result.user_id = user_profile.id
+                            logger.info(
+                                f"Successfully synced Azure AD user to database: "
+                                f"{user_profile.id} (was: {azure_ad_object_id})"
+                            )
+                        else:
+                            # User exists, update result to use database user ID
+                            result.user_id = existing_user.id
+                            logger.debug(
+                                f"Azure AD user already exists in database: {existing_user.id}"
+                            )
+            except Exception as sync_error:
+                # Log the error but don't fail authentication
+                # The user is still authenticated, just not synced to DB
+                logger.error(
+                    f"Failed to auto-sync Azure AD user to database: {sync_error}",
+                    exc_info=True,
+                )
+                logger.error(
+                    f"Auto-sync error details - user_id: {result.user_id}, "
+                    f"email: {result.email}, azure_ad_object_id: {result.user_info.oid if result.user_info else 'N/A'}"
+                )
+                # Continue with Azure AD object ID as user_id
+                # The user will be synced on next request or can be manually synced
+                # The /users/me endpoint has a fallback to handle this case
+        
         return result
     except AuthenticationError as e:
-        logger.warning(f"Authentication failed: {e}")
+        logger.warning(f"Authentication failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
+            detail=f"Authentication failed: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except Exception as e:
-        logger.error(f"Unexpected error during authentication: {e}")
+        logger.error(f"Unexpected error during authentication: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed",
+            detail=f"Authentication failed: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -308,6 +402,52 @@ async def get_user_or_internal_auth(
     try:
         validator = get_token_validator()
         result = await validator.validate_token(token)
+        
+        # Auto-sync Azure AD users to database (same logic as get_current_user)
+        if result.token_type == "azure_ad_b2c" and result.user_info:
+            try:
+                async with get_session_context() as session:
+                    user_service = get_user_service(session)
+                    
+                    azure_ad_object_id = result.user_info.oid
+                    if azure_ad_object_id:
+                        existing_user = await user_service.repository.get_by_azure_ad_object_id(
+                            azure_ad_object_id
+                        )
+                        
+                        if not existing_user:
+                            logger.info(
+                                f"Auto-syncing Azure AD user to database: {result.email} "
+                                f"(object_id: {azure_ad_object_id})"
+                            )
+                            
+                            email = result.user_info.email or result.email
+                            name = result.user_info.display_name or result.user_info.name or email.split("@")[0]
+                            tenant_id = result.user_info.tenant_id
+                            
+                            user_profile = await user_service.sync_user_from_azure_ad(
+                                azure_ad_object_id=azure_ad_object_id,
+                                email=email,
+                                name=name,
+                                azure_ad_tenant_id=tenant_id,
+                            )
+                            
+                            result.user_id = user_profile.id
+                            logger.info(
+                                f"Successfully synced Azure AD user to database: "
+                                f"{user_profile.id} (was: {azure_ad_object_id})"
+                            )
+                        else:
+                            result.user_id = existing_user.id
+                            logger.debug(
+                                f"Azure AD user already exists in database: {existing_user.id}"
+                            )
+            except Exception as sync_error:
+                logger.error(
+                    f"Failed to auto-sync Azure AD user to database: {sync_error}",
+                    exc_info=True,
+                )
+        
         return result
     except AuthenticationError as e:
         logger.warning(f"Authentication failed: {e}")

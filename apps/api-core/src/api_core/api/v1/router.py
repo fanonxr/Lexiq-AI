@@ -30,9 +30,11 @@ Rate Limiting:
 from fastapi import APIRouter
 
 from api_core.api.v1 import (
+    agent,
     appointments,
     auth,
     billing,
+    calendar_integrations,
     calls,
     conversations,
     dashboard,
@@ -61,7 +63,9 @@ router.include_router(users.router)
 router.include_router(billing.router)
 router.include_router(dashboard.router)
 router.include_router(knowledge.router)
+router.include_router(agent.router)
 router.include_router(appointments.router)
+router.include_router(calendar_integrations.router)
 router.include_router(leads.router)
 router.include_router(notifications.router)
 router.include_router(firms.router)
@@ -94,7 +98,9 @@ async def api_info():
             "billing": "/api/v1/billing",
             "dashboard": "/api/v1/dashboard",
             "knowledge": "/api/v1/knowledge",
+            "agent": "/api/v1/agent",
             "appointments": "/api/v1/appointments",
+            "calendar-integrations": "/api/v1/calendar-integrations",
             "leads": "/api/v1/leads",
             "notifications": "/api/v1/notifications",
             "firms": "/api/v1/firms",

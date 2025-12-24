@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { subDays, format } from "date-fns";
+import { useKPIs, useVolumeData, useRecentActivity } from "@/hooks/useDashboard";
 
 // Lazy load heavy chart component
 const VolumeChart = lazy(() => 
@@ -39,115 +40,25 @@ export const dynamic = "force-dynamic";
  * - Middle Row: Volume Chart (8 columns) + Activity List (4 columns)
  */
 export default function DashboardPage() {
-  // Loading state - will be replaced with actual hook loading states
-  const [isLoadingKPIs, setIsLoadingKPIs] = useState(false);
-  const [isLoadingChart, setIsLoadingChart] = useState(false);
-  const [isLoadingActivity, setIsLoadingActivity] = useState(false);
-  
-  // Error state - will be replaced with actual hook error states
-  const [kpiError, setKpiError] = useState<Error | null>(null);
-  const [chartError, setChartError] = useState<Error | null>(null);
-  const [activityError, setActivityError] = useState<Error | null>(null);
-
   // Date range state - default to last 30 days
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: subDays(new Date(), 30),
     to: new Date(),
   });
 
-  // Mock KPI data - will be replaced with API calls later
-  const kpiData = useMemo(() => [
-    {
-      title: "Billable Hours Saved",
-      value: 1247,
-      trend: { direction: "up" as const, percentage: 12, label: "from last week" },
-    },
-    {
-      title: "Calls Handled",
-      value: 342,
-      trend: { direction: "up" as const, percentage: 8, label: "from last week" },
-    },
-    {
-      title: "Revenue Impact",
-      value: 45600,
-      formatValue: (val: number) => `$${val.toLocaleString()}`,
-      trend: { direction: "up" as const, percentage: 15, label: "from last week" },
-    },
-    {
-      title: "Active Clients",
-      value: 89,
-      trend: { direction: "up" as const, percentage: 5, label: "from last week" },
-    },
-  ], []);
+  // Fetch data using hooks
+  const { data: kpiData, isLoading: isLoadingKPIs, error: kpiError, refetch: refetchKPIs } = useKPIs();
+  const { data: volumeDataPoints, isLoading: isLoadingChart, error: chartError, refetch: refetchChart } = useVolumeData(dateRange);
+  const { data: activityData, isLoading: isLoadingActivity, error: activityError, refetch: refetchActivity } = useRecentActivity(10);
 
-  // Mock volume chart data - generates data for the selected date range
+  // Transform volume data points to chart format
   const volumeData = useMemo<VolumeChartDataPoint[]>(() => {
-    if (!dateRange?.from || !dateRange?.to) return [];
-    
-    const days = Math.ceil(
-      (dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    const data: VolumeChartDataPoint[] = [];
-    
-    for (let i = 0; i <= days; i++) {
-      const date = new Date(dateRange.from);
-      date.setDate(date.getDate() + i);
-      // Generate mock data with some variation
-      const value = Math.floor(Math.random() * 200) + 50;
-      data.push({
-        date: format(date, "yyyy-MM-dd"),
-        value,
-      });
-    }
-    
-    return data;
-  }, [dateRange]);
-
-  // Mock activity data
-  const activityData = useMemo<ActivityListItem[]>(() => [
-    {
-      id: "1",
-      icon: <User className="h-4 w-4" />,
-      text: "New Client Intake: John Doe",
-      timestamp: new Date(Date.now() - 10 * 60 * 1000), // 10 minutes ago
-      onClick: () => console.log("Clicked activity 1"),
-    },
-    {
-      id: "2",
-      icon: <Phone className="h-4 w-4" />,
-      text: "Incoming call from Sarah Smith",
-      timestamp: new Date(Date.now() - 25 * 60 * 1000), // 25 minutes ago
-      onClick: () => console.log("Clicked activity 2"),
-    },
-    {
-      id: "3",
-      icon: <AlertCircle className="h-4 w-4" />,
-      text: "Follow-up required: Case #1234",
-      timestamp: new Date(Date.now() - 45 * 60 * 1000), // 45 minutes ago
-      onClick: () => console.log("Clicked activity 3"),
-    },
-    {
-      id: "4",
-      icon: <DollarSign className="h-4 w-4" />,
-      text: "Payment received: $2,500",
-      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-      onClick: () => console.log("Clicked activity 4"),
-    },
-    {
-      id: "5",
-      icon: <FileText className="h-4 w-4" />,
-      text: "Document uploaded: Contract.pdf",
-      timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000), // 3 hours ago
-      onClick: () => console.log("Clicked activity 5"),
-    },
-    {
-      id: "6",
-      icon: <Clock className="h-4 w-4" />,
-      text: "Appointment scheduled: Tomorrow 2 PM",
-      timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000), // 4 hours ago
-      onClick: () => console.log("Clicked activity 6"),
-    },
-  ], []);
+    if (!volumeDataPoints) return [];
+    return volumeDataPoints.map(point => ({
+      date: point.date,
+      value: point.value,
+    }));
+  }, [volumeDataPoints]);
 
   return (
     <div className="space-y-6">
@@ -175,10 +86,7 @@ export default function DashboardPage() {
       {kpiError ? (
         <ErrorState
           error={kpiError}
-          onRetry={() => {
-            setKpiError(null);
-            // In real implementation, this would call refetch()
-          }}
+          onRetry={refetchKPIs}
           title="Failed to load KPIs"
           inline
         />
@@ -190,7 +98,7 @@ export default function DashboardPage() {
               <KPICardSkeleton key={index} />
             ))
           ) : (
-            kpiData.map((kpi, index) => (
+            (kpiData || []).map((kpi, index) => (
               <KPICard
                 key={index}
                 title={kpi.title}
@@ -213,10 +121,7 @@ export default function DashboardPage() {
               <CardContent className="pt-6">
                 <ErrorState
                   error={chartError}
-                  onRetry={() => {
-                    setChartError(null);
-                    // In real implementation, this would call refetch()
-                  }}
+                  onRetry={refetchChart}
                   title="Failed to load chart data"
                   inline
                 />
@@ -258,7 +163,22 @@ export default function DashboardPage() {
               <CardTitle className="text-base font-semibold">Recent Activity</CardTitle>
             </CardHeader>
             <CardContent>
-              <ActivityList items={activityData} maxItems={10} />
+              {isLoadingActivity ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="h-12 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+                  ))}
+                </div>
+              ) : activityError ? (
+                <ErrorState
+                  error={activityError}
+                  onRetry={refetchActivity}
+                  title="Failed to load activity"
+                  inline
+                />
+              ) : (
+                <ActivityList items={activityData || []} maxItems={10} />
+              )}
             </CardContent>
           </Card>
         </div>

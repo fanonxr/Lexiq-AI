@@ -1,11 +1,13 @@
 """Storage service for Azure Blob Storage operations."""
 
 import logging
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from azure.core.exceptions import AzureError
+from azure.core.credentials import AzureNamedKeyCredential
 from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
 
 from api_core.config import get_settings
@@ -26,58 +28,143 @@ class StorageService:
     def _get_blob_service_client(self) -> BlobServiceClient:
         """Get or create BlobServiceClient (synchronous)."""
         if self._blob_service_client is None:
-            if self.settings.storage.use_managed_identity:
-                # Use Managed Identity
+            # Priority: connection_string > account_key > managed_identity
+            # For local development (Azurite), connection_string is preferred
+            logger.debug(
+                f"Initializing sync blob client - connection_string: {bool(self.settings.storage.connection_string)}, "
+                f"account_key: {bool(self.settings.storage.account_key)}, "
+                f"use_managed_identity: {self.settings.storage.use_managed_identity}"
+            )
+            if self.settings.storage.connection_string:
+                # Use connection string (preferred for local dev with Azurite)
+                logger.info(
+                    f"Using connection string for Azure Blob Storage (Azurite/local). "
+                    f"Connection string length: {len(self.settings.storage.connection_string)}"
+                )
+                try:
+                    self._blob_service_client = BlobServiceClient.from_connection_string(
+                        self.settings.storage.connection_string
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create BlobServiceClient from connection string: {e}")
+                    raise
+            elif self.settings.storage.account_key:
+                # Use account key
+                logger.info("Using account key for Azure Blob Storage")
+                # Check if this is Azurite
+                is_azurite = (
+                    self.settings.storage.connection_string and "azurite" in self.settings.storage.connection_string.lower()
+                ) or (
+                    self.settings.storage.account_name == "devstoreaccount1"
+                )
+                if is_azurite:
+                    account_url = f"http://azurite:10000/{self.settings.storage.account_name}"
+                else:
+                    account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
+                credential = AzureNamedKeyCredential(
+                    name=self.settings.storage.account_name,
+                    key=self.settings.storage.account_key
+                )
+                self._blob_service_client = BlobServiceClient(
+                    account_url=account_url,
+                    credential=credential,
+                )
+            elif self.settings.storage.use_managed_identity:
+                # Use Managed Identity (for production Azure deployments)
+                logger.info("Using Managed Identity for Azure Blob Storage")
                 account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
                 credential = DefaultAzureCredential()
                 self._blob_service_client = BlobServiceClient(
                     account_url=account_url, credential=credential
                 )
-            elif self.settings.storage.connection_string:
-                # Use connection string
-                self._blob_service_client = BlobServiceClient.from_connection_string(
-                    self.settings.storage.connection_string
-                )
-            elif self.settings.storage.account_key:
-                # Use account key
-                account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
-                self._blob_service_client = BlobServiceClient(
-                    account_url=account_url,
-                    credential=self.settings.storage.account_key,
-                )
             else:
                 raise ValueError(
                     "Storage credentials not configured. Set STORAGE_ACCOUNT_NAME and "
-                    "either STORAGE_USE_MANAGED_IDENTITY=true or STORAGE_CONNECTION_STRING"
+                    "either STORAGE_CONNECTION_STRING (for local/Azurite) or STORAGE_USE_MANAGED_IDENTITY=true (for Azure)"
                 )
         return self._blob_service_client
 
     def _get_async_blob_service_client(self) -> AsyncBlobServiceClient:
         """Get or create AsyncBlobServiceClient."""
         if self._async_blob_service_client is None:
-            if self.settings.storage.use_managed_identity:
-                # Use Managed Identity
+            # Priority: account_key (for Azurite) > connection_string > managed_identity
+            # For Azurite, account_key with AzureNamedKeyCredential is more reliable
+            logger.debug(
+                f"Initializing async blob client - connection_string: {bool(self.settings.storage.connection_string)}, "
+                f"account_key: {bool(self.settings.storage.account_key)}, "
+                f"use_managed_identity: {self.settings.storage.use_managed_identity}"
+            )
+            
+            # Check if this is Azurite (local dev)
+            is_azurite = (
+                self.settings.storage.connection_string and "azurite" in self.settings.storage.connection_string.lower()
+            ) or (
+                self.settings.storage.account_name == "devstoreaccount1"
+            )
+            
+            # For Azurite, connection string is most reliable (handles endpoint correctly)
+            if is_azurite and self.settings.storage.connection_string:
+                logger.info("Using connection string for Azurite (most reliable method)")
+                try:
+                    # Remove any trailing semicolons that might cause issues
+                    conn_str = self.settings.storage.connection_string.rstrip(';')
+                    self._async_blob_service_client = AsyncBlobServiceClient.from_connection_string(
+                        conn_str
+                    )
+                    logger.info(f"Successfully created AsyncBlobServiceClient for Azurite using connection string")
+                except Exception as e:
+                    logger.error(f"Failed to create AsyncBlobServiceClient from connection string: {e}")
+                    # Fallback to account_key method
+                    if self.settings.storage.account_key:
+                        logger.info("Falling back to account_key method for Azurite")
+                        account_url = f"http://azurite:10000/{self.settings.storage.account_name}"
+                        credential = AzureNamedKeyCredential(
+                            name=self.settings.storage.account_name,
+                            key=self.settings.storage.account_key
+                        )
+                        self._async_blob_service_client = AsyncBlobServiceClient(
+                            account_url=account_url,
+                            credential=credential,
+                        )
+                    else:
+                        raise
+            elif self.settings.storage.connection_string:
+                # Use connection string (fallback for local dev or other scenarios)
+                logger.info(
+                    f"Using connection string for Azure Blob Storage. "
+                    f"Connection string length: {len(self.settings.storage.connection_string)}"
+                )
+                try:
+                    self._async_blob_service_client = AsyncBlobServiceClient.from_connection_string(
+                        self.settings.storage.connection_string
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create AsyncBlobServiceClient from connection string: {e}")
+                    raise
+            elif self.settings.storage.account_key:
+                # Use account key for real Azure Storage
+                logger.info("Using account key for Azure Blob Storage")
+                account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
+                credential = AzureNamedKeyCredential(
+                    name=self.settings.storage.account_name,
+                    key=self.settings.storage.account_key
+                )
+                self._async_blob_service_client = AsyncBlobServiceClient(
+                    account_url=account_url,
+                    credential=credential,
+                )
+            elif self.settings.storage.use_managed_identity:
+                # Use Managed Identity (for production Azure deployments)
+                logger.info("Using Managed Identity for Azure Blob Storage")
                 account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
                 credential = DefaultAzureCredential()
                 self._async_blob_service_client = AsyncBlobServiceClient(
                     account_url=account_url, credential=credential
                 )
-            elif self.settings.storage.connection_string:
-                # Use connection string
-                self._async_blob_service_client = AsyncBlobServiceClient.from_connection_string(
-                    self.settings.storage.connection_string
-                )
-            elif self.settings.storage.account_key:
-                # Use account key
-                account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
-                self._async_blob_service_client = AsyncBlobServiceClient(
-                    account_url=account_url,
-                    credential=self.settings.storage.account_key,
-                )
             else:
                 raise ValueError(
                     "Storage credentials not configured. Set STORAGE_ACCOUNT_NAME and "
-                    "either STORAGE_USE_MANAGED_IDENTITY=true or STORAGE_CONNECTION_STRING"
+                    "either STORAGE_CONNECTION_STRING (for local/Azurite) or STORAGE_USE_MANAGED_IDENTITY=true (for Azure)"
                 )
         return self._async_blob_service_client
 
@@ -198,6 +285,98 @@ class StorageService:
             Container name: firm-{firm_id}-documents
         """
         return f"firm-{firm_id}-documents"
+
+    async def generate_signed_url(
+        self,
+        container_name: str,
+        blob_name: str,
+        expiry_minutes: int = 60,
+    ) -> str:
+        """Generate a signed URL for a blob.
+
+        Args:
+            container_name: Name of the container
+            blob_name: Name of the blob
+            expiry_minutes: URL expiration time in minutes (default: 60)
+
+        Returns:
+            Signed URL with SAS token
+
+        Raises:
+            AzureError: If URL generation fails
+            ValueError: If storage is not configured for SAS token generation
+        """
+        try:
+            client = self._get_async_blob_service_client()
+            blob_client = client.get_blob_client(container=container_name, blob=blob_name)
+
+            # Check if blob exists
+            if not await blob_client.exists():
+                raise ValueError(f"Blob {container_name}/{blob_name} does not exist")
+
+            # Generate SAS token
+            # Note: SAS tokens require account_key or connection_string
+            # If using managed identity only, we can't generate SAS tokens
+            # In that case, we return the blob URL (which requires authentication)
+            if not self.settings.storage.account_key and not self.settings.storage.connection_string:
+                logger.warning(
+                    "Cannot generate SAS token: account_key or connection_string not configured. "
+                    "Returning blob URL (requires authentication)."
+                )
+                # Return the blob URL (will require authentication to access)
+                sync_client = self._get_blob_service_client()
+                sync_blob_client = sync_client.get_blob_client(
+                    container=container_name, blob=blob_name
+                )
+                return sync_blob_client.url
+
+            # Generate SAS token with read permission
+            # For connection string, extract account key
+            account_key = self.settings.storage.account_key
+            if not account_key and self.settings.storage.connection_string:
+                # Extract account key from connection string
+                # Format: DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=...
+                from urllib.parse import parse_qs, urlparse
+                parts = self.settings.storage.connection_string.split(";")
+                for part in parts:
+                    if part.startswith("AccountKey="):
+                        account_key = part.split("=", 1)[1]
+                        break
+
+            if not account_key:
+                raise ValueError(
+                    "Cannot generate SAS token: account_key not available. "
+                    "Configure STORAGE_ACCOUNT_KEY or use connection string."
+                )
+
+            sync_client = self._get_blob_service_client()
+            sync_blob_client = sync_client.get_blob_client(
+                container=container_name, blob=blob_name
+            )
+
+            # Generate SAS token
+            sas_token = generate_blob_sas(
+                account_name=self.settings.storage.account_name,
+                container_name=container_name,
+                blob_name=blob_name,
+                account_key=account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.utcnow() + timedelta(minutes=expiry_minutes),
+            )
+
+            # Construct signed URL
+            signed_url = f"{sync_blob_client.url}?{sas_token}"
+            logger.info(
+                f"Generated signed URL for {container_name}/{blob_name}, expires in {expiry_minutes} minutes"
+            )
+            return signed_url
+
+        except AzureError as e:
+            logger.error(f"Failed to generate signed URL for {container_name}/{blob_name}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error generating signed URL: {e}")
+            raise AzureError(f"Failed to generate signed URL: {str(e)}") from e
 
     async def close(self) -> None:
         """Close storage clients."""

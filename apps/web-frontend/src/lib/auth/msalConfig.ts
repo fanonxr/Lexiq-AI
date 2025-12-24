@@ -128,13 +128,58 @@ export const logoutRequest = {
  * Token Request Configuration
  * 
  * Used for acquiring tokens for API calls.
- * Can be customized per API endpoint.
+ * 
+ * For Microsoft Entra ID (Azure AD), there are two scenarios:
+ * 
+ * 1. **Same App Registration** (Frontend and Backend use same client ID):
+ *    - Use the client ID directly: `{client-id}`
+ *    - This is what we're using by default
+ * 
+ * 2. **Separate App Registrations** (Frontend and Backend use different client IDs):
+ *    - Expose an API in the backend app registration
+ *    - Use API scope format: `api://{backend-client-id}/.default`
+ *    - Set NEXT_PUBLIC_API_CLIENT_ID to the backend's client ID
+ * 
+ * The backend validates that the token's audience (aud claim) matches:
+ * - The backend's client_id (if using client ID directly)
+ * - The API identifier (if using api:// format)
  */
-export const tokenRequest = (scopes: string[] = ["User.Read"]) => ({
-  scopes,
-  // Force refresh if needed
-  forceRefresh: false,
-});
+export const tokenRequest = (scopes?: string[]) => {
+  const env = getEnv();
+  
+  // Get API client ID (backend's client ID, or frontend's if same app)
+  const apiClientId = process.env.NEXT_PUBLIC_API_CLIENT_ID || env.entraId.clientId;
+  const frontendClientId = env.entraId.clientId;
+  
+  // Check if frontend and backend use the same app registration
+  const sameAppRegistration = apiClientId === frontendClientId;
+  
+  // Check if we should use API scope format
+  const useApiScope = process.env.NEXT_PUBLIC_USE_API_SCOPE === "true";
+  
+  let defaultScope: string;
+  
+  if (sameAppRegistration && !useApiScope) {
+    // Same app registration: Use client ID directly (GUID format)
+    // This is required when requesting a token for the same app
+    defaultScope = apiClientId;
+  } else {
+    // Different app registrations OR explicitly using API scope:
+    // Use API scope format (requires API to be exposed in Azure Portal)
+    defaultScope = `api://${apiClientId}/.default`;
+  }
+  
+  if (process.env.NODE_ENV === "development") {
+    console.log("[MSAL Config] Token request scope:", defaultScope);
+    console.log("[MSAL Config] Same app registration:", sameAppRegistration);
+  }
+  
+  return {
+    scopes: scopes || [defaultScope],
+    // Force refresh if needed
+    forceRefresh: false,
+  };
+};
 
 /**
  * Validate MSAL Configuration

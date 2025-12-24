@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { UploadZone } from "@/components/knowledge/UploadZone";
 import { FileDataTable, type FileMetadata } from "@/components/knowledge/FileDataTable";
 import { FileTableSkeleton } from "@/components/knowledge/FileTableSkeleton";
@@ -8,7 +8,7 @@ import { VerificationChat, type ChatMessage } from "@/components/knowledge/Verif
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FileText } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useFiles, useUploadFile, useDeleteFile, useReindexFile, useQueryKnowledgeBase } from "@/hooks/useKnowledgeBase";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
@@ -27,104 +27,64 @@ export const dynamic = "force-dynamic";
  */
 export default function KnowledgeBasePage() {
   // File management state
-  const [files, setFiles] = useState<FileMetadata[]>([]);
   const [highlightedFileId, setHighlightedFileId] = useState<string | null>(null);
-  // Loading state - will be replaced with actual hook loading states
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
-  // Error state - will be replaced with actual hook error states
-  const [filesError, setFilesError] = useState<Error | null>(null);
+
+  // Fetch files using hooks
+  const { data: files, isLoading: isLoadingFiles, error: filesError, refetch: refetchFiles } = useFiles();
+  const { mutate: uploadFile, isLoading: isUploading, progress: uploadProgress } = useUploadFile();
+  const { mutate: deleteFile, isLoading: isDeleting } = useDeleteFile();
+  const { mutate: reindexFile, isLoading: isReindexing } = useReindexFile();
+  const { mutate: queryKB, isLoading: isQuerying } = useQueryKnowledgeBase();
 
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Mock initial files for demonstration
-  const mockFiles: FileMetadata[] = useMemo(
-    () => [
-      {
-        id: "file-1",
-        name: "fee-schedule.pdf",
-        date: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-        size: 1024 * 512, // 512 KB
-        status: "ready",
-      },
-      {
-        id: "file-2",
-        name: "terms-of-service.pdf",
-        date: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
-        size: 1024 * 1024 * 2, // 2 MB
-        status: "ready",
-      },
-      {
-        id: "file-3",
-        name: "client-handbook.pdf",
-        date: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 day ago
-        size: 1024 * 1024 * 5, // 5 MB
-        status: "processing",
-      },
-    ],
-    []
-  );
-
-  // Initialize with mock files if empty
-  useMemo(() => {
-    if (files.length === 0) {
-      setFiles(mockFiles);
-    }
-  }, [files.length, mockFiles]);
 
   /**
    * Handle file upload
    */
-  const handleFileSelect = useCallback((selectedFiles: File[]) => {
-    const newFiles: FileMetadata[] = selectedFiles.map((file, index) => ({
-      id: `file-${Date.now()}-${index}`,
-      name: file.name,
-      date: new Date(),
-      size: file.size,
-      status: "processing" as const,
-    }));
-
-    setFiles((prev) => [...newFiles, ...prev]);
-
-    // Simulate processing completion after 3 seconds
-    setTimeout(() => {
-      setFiles((prev) =>
-        prev.map((f) =>
-          newFiles.some((nf) => nf.id === f.id)
-            ? { ...f, status: "ready" as const }
-            : f
-        )
-      );
-    }, 3000);
-  }, []);
+  const handleFileSelect = useCallback(async (selectedFiles: File[]) => {
+    for (const file of selectedFiles) {
+      try {
+        await uploadFile(file, (progress) => {
+          // Progress callback - can be used for UI updates if needed
+          console.log(`Upload progress for ${file.name}: ${progress}%`);
+        });
+        // Refresh file list after successful upload
+        await refetchFiles();
+      } catch (error) {
+        console.error(`Failed to upload ${file.name}:`, error);
+        // Error is handled by the hook, but we could show a toast here
+      }
+    }
+  }, [uploadFile, refetchFiles]);
 
   /**
    * Handle file deletion
    */
-  const handleDelete = useCallback((fileId: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== fileId));
-  }, []);
+  const handleDelete = useCallback(async (fileId: string) => {
+    try {
+      await deleteFile(fileId);
+      // Refresh file list after successful deletion
+      await refetchFiles();
+    } catch (error) {
+      console.error(`Failed to delete file ${fileId}:`, error);
+      // Error is handled by the hook
+    }
+  }, [deleteFile, refetchFiles]);
 
   /**
    * Handle file re-indexing
    */
-  const handleReindex = useCallback((fileId: string) => {
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.id === fileId ? { ...f, status: "processing" as const } : f
-      )
-    );
-
-    // Simulate re-indexing completion after 2 seconds
-    setTimeout(() => {
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === fileId ? { ...f, status: "ready" as const } : f
-        )
-      );
-    }, 2000);
-  }, []);
+  const handleReindex = useCallback(async (fileId: string) => {
+    try {
+      await reindexFile(fileId);
+      // Refresh file list after successful re-indexing
+      await refetchFiles();
+    } catch (error) {
+      console.error(`Failed to re-index file ${fileId}:`, error);
+      // Error is handled by the hook
+    }
+  }, [reindexFile, refetchFiles]);
 
   /**
    * Handle sending a chat message
@@ -137,25 +97,31 @@ export default function KnowledgeBasePage() {
         content: message,
       };
       setMessages((prev) => [...prev, userMessage]);
-      setIsLoading(true);
 
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      // Mock response based on message content
-      const assistantMessage: ChatMessage = {
-        role: "assistant",
-        content: `Based on the uploaded documents, I can help you with that. Here's what I found regarding "${message}":\n\n[This is a mock response. In production, this would be generated by the RAG system using the indexed knowledge base.]`,
-        sources: files
-          .filter((f) => f.status === "ready")
-          .slice(0, 2)
-          .map((f) => f.id),
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
-      setIsLoading(false);
+      try {
+        // Query knowledge base via RAG
+        const response = await queryKB(message);
+        
+        // Add assistant response
+        const assistantMessage: ChatMessage = {
+          role: "assistant",
+          content: response.answer,
+          sources: response.sources || [],
+        };
+        
+        setMessages((prev) => [...prev, assistantMessage]);
+      } catch (error) {
+        console.error("Failed to query knowledge base:", error);
+        // Add error message
+        const errorMessage: ChatMessage = {
+          role: "assistant",
+          content: "Sorry, I encountered an error while querying the knowledge base. Please try again.",
+          sources: [],
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      }
     },
-    [files]
+    [queryKB]
   );
 
   /**
@@ -195,16 +161,13 @@ export default function KnowledgeBasePage() {
       {filesError ? (
         <ErrorState
           error={filesError}
-          onRetry={() => {
-            setFilesError(null);
-            // In real implementation, this would call refetch()
-          }}
+          onRetry={refetchFiles}
           title="Failed to load files"
           inline
         />
       ) : isLoadingFiles ? (
         <FileTableSkeleton count={5} />
-      ) : files.length === 0 ? (
+      ) : !files || files.length === 0 ? (
         <EmptyState
           icon={<FileText className="h-12 w-12" />}
           title="No files uploaded"
@@ -224,7 +187,7 @@ export default function KnowledgeBasePage() {
       <VerificationChat
         messages={messages}
         onSendMessage={handleSendMessage}
-        isLoading={isLoading}
+        isLoading={isQuerying}
         onSourceHover={handleSourceHover}
         onSourceLeave={handleSourceLeave}
       />

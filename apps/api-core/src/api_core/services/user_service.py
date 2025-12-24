@@ -160,6 +160,36 @@ class UserService:
             return None
         return self._user_to_profile(user)
 
+    async def get_user_by_id_or_azure_ad_object_id(
+        self, user_id: str, azure_ad_object_id: Optional[str] = None
+    ) -> Optional[UserProfile]:
+        """
+        Get user by ID, with fallback to Azure AD object ID.
+        
+        This is useful when user_id might be either:
+        - Database UUID (after successful auto-sync)
+        - Azure AD object ID (if auto-sync failed or hasn't run)
+
+        Args:
+            user_id: User ID (could be database UUID or Azure AD object ID)
+            azure_ad_object_id: Optional Azure AD object ID for fallback
+
+        Returns:
+            User profile or None if not found
+        """
+        # Try database ID first
+        user = await self.repository.get_by_id(user_id)
+        if user:
+            return self._user_to_profile(user)
+        
+        # Fallback to Azure AD object ID if provided
+        if azure_ad_object_id:
+            user = await self.repository.get_by_azure_ad_object_id(azure_ad_object_id)
+            if user:
+                return self._user_to_profile(user)
+        
+        return None
+
     async def get_user_by_email(self, email: str) -> Optional[UserProfile]:
         """
         Get user by email.

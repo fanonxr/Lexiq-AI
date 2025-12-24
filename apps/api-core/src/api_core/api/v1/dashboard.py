@@ -14,6 +14,7 @@ from api_core.models.dashboard import (
     ActivityFeedResponse,
     CallListResponse,
     DashboardStats,
+    VolumeDataResponse,
 )
 from api_core.services.dashboard_service import get_dashboard_service
 
@@ -152,6 +153,76 @@ async def get_usage_summary(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve usage summary",
+        ) from e
+
+
+@router.get(
+    "/volume",
+    response_model=VolumeDataResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_volume_data(
+    from_date: str = Query(..., alias="from", description="Start date (ISO format: YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (ISO format: YYYY-MM-DD)"),
+    current_user: TokenValidationResult = Depends(get_current_active_user),
+):
+    """
+    Get call volume data for a date range.
+
+    Returns daily call counts for the specified date range, suitable for
+    volume charts. Missing dates are filled with 0.
+
+    Args:
+        from_date: Start date in ISO format (YYYY-MM-DD)
+        to_date: End date in ISO format (YYYY-MM-DD)
+        current_user: Current authenticated user
+
+    Returns:
+        VolumeDataResponse with daily call counts
+    """
+    try:
+        from datetime import datetime
+
+        # Parse dates
+        try:
+            date_from = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+            date_to = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid date format. Use ISO format (YYYY-MM-DD): {e}",
+            ) from e
+
+        # Validate date range
+        if date_from > date_to:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="from_date must be before or equal to to_date",
+            )
+
+        # Limit date range to prevent excessive queries
+        max_days = 365
+        if (date_to - date_from).days > max_days:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Date range cannot exceed {max_days} days",
+            )
+
+        async with get_session_context() as session:
+            dashboard_service = get_dashboard_service(session)
+            volume_data = await dashboard_service.get_volume_data(
+                current_user.user_id, date_from, date_to
+            )
+            return volume_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error getting volume data for user {current_user.user_id}: {e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve volume data",
         ) from e
 
 

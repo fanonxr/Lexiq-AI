@@ -101,3 +101,16 @@ class ActivityFeedResponse(BaseModel):
     activities: List[ActivityItem]
     total: int
     limit: int
+
+
+class VolumeDataPoint(BaseModel):
+    """Volume chart data point."""
+
+    date: str  # ISO date string (YYYY-MM-DD)
+    value: int  # Number of calls on this date
+
+
+class VolumeDataResponse(BaseModel):
+    """Volume data response model."""
+
+    data: List[VolumeDataPoint]

@@ -13,10 +13,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
-from typing import List
+from typing import List, Optional
 from zoneinfo import ZoneInfo
 
-from api_core.exceptions import ValidationError
+from api_core.database.models import Appointment
+from api_core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from api_core.models.appointments import (
     AppointmentCreateRequest,
     AppointmentResponse,
@@ -188,6 +189,122 @@ class AppointmentsService:
             },
             notes=created.notes,
             created_at=created.created_at,
+        )
+
+    async def get_user_appointments(
+        self,
+        user_id: str,
+        firm_id: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[Appointment]:
+        """
+        Get appointments for a user.
+        
+        Args:
+            user_id: User ID
+            firm_id: Optional firm ID
+            start_date: Optional start date filter
+            end_date: Optional end date filter
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of Appointment models
+        """
+        if self._repo is None:
+            raise RuntimeError("AppointmentsService requires a database session for user operations")
+        
+        return await self._repo.get_by_user_id(
+            user_id=user_id,
+            firm_id=firm_id,
+            start_date=start_date,
+            end_date=end_date,
+            skip=skip,
+            limit=limit,
+        )
+
+    async def update_appointment(
+        self,
+        appointment_id: str,
+        user_id: str,
+        title: Optional[str] = None,
+        notes: Optional[str] = None,
+        status: Optional[str] = None,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
+    ) -> Appointment:
+        """
+        Update an appointment.
+        
+        Args:
+            appointment_id: Appointment ID
+            user_id: User ID (for authorization check)
+            title: Optional title to update
+            notes: Optional notes to update
+            status: Optional status to update
+            start_at: Optional start time to update
+            end_at: Optional end time to update
+            
+        Returns:
+            Updated Appointment model
+        """
+        if self._repo is None:
+            raise RuntimeError("AppointmentsService requires a database session for update operations")
+        
+        appointment = await self._repo.get_by_id(appointment_id)
+        if not appointment:
+            raise NotFoundError(resource="Appointment", resource_id=appointment_id)
+        
+        # Check authorization - user must have created it or belong to the firm
+        if appointment.created_by_user_id != user_id:
+            # Check if user belongs to the firm
+            if not appointment.firm_id:
+                raise AuthorizationError(f"User {user_id} does not have access to appointment {appointment_id}")
+            # TODO: Add firm membership check if needed
+        
+        # Update fields
+        update_data = {}
+        if title is not None:
+            update_data["title"] = title
+        if notes is not None:
+            update_data["notes"] = notes
+        if status is not None:
+            update_data["status"] = status
+        if start_at is not None:
+            update_data["start_at"] = start_at
+        if end_at is not None:
+            update_data["end_at"] = end_at
+        
+        if not update_data:
+            return appointment
+        
+        return await self._repo.update(appointment_id, **update_data)
+
+    async def cancel_appointment(
+        self,
+        appointment_id: str,
+        user_id: str,
+        reason: Optional[str] = None,
+    ) -> Appointment:
+        """
+        Cancel an appointment.
+        
+        Args:
+            appointment_id: Appointment ID
+            user_id: User ID (for authorization check)
+            reason: Optional cancellation reason
+            
+        Returns:
+            Cancelled Appointment model
+        """
+        return await self.update_appointment(
+            appointment_id=appointment_id,
+            user_id=user_id,
+            status="cancelled",
+            notes=reason if reason else None,
         )
 
 

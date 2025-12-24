@@ -29,16 +29,52 @@ async def get_current_user_profile(
     try:
         async with get_session_context() as session:
             user_service = get_user_service(session)
+            
+            # Try to get user by ID (database UUID)
             user = await user_service.get_user_by_id(current_user.user_id)
-
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User profile not found",
-                )
-
-            # Get full user model for UserResponse
-            db_user = await user_service.repository.get_by_id(current_user.user_id)
+            db_user = None
+            
+            if user:
+                # User found by database ID
+                db_user = await user_service.repository.get_by_id(current_user.user_id)
+            elif current_user.token_type == "azure_ad_b2c" and current_user.user_info:
+                # Fallback: If user not found by ID, try Azure AD object ID
+                # This handles cases where auto-sync failed or user_id is still Azure AD object ID
+                azure_ad_object_id = current_user.user_info.oid
+                if azure_ad_object_id:
+                    logger.debug(
+                        f"User not found by ID {current_user.user_id}, "
+                        f"trying Azure AD object ID: {azure_ad_object_id}"
+                    )
+                    db_user = await user_service.repository.get_by_azure_ad_object_id(
+                        azure_ad_object_id
+                    )
+                    
+                    if db_user:
+                        # User found by Azure AD object ID - sync might have failed earlier
+                        # Try to sync again to ensure user is up to date
+                        try:
+                            email = current_user.user_info.email or current_user.email
+                            name = current_user.user_info.display_name or current_user.user_info.name or email.split("@")[0]
+                            tenant_id = current_user.user_info.tenant_id
+                            
+                            user_profile = await user_service.sync_user_from_azure_ad(
+                                azure_ad_object_id=azure_ad_object_id,
+                                email=email,
+                                name=name,
+                                azure_ad_tenant_id=tenant_id,
+                            )
+                            db_user = await user_service.repository.get_by_id(user_profile.id)
+                            logger.info(
+                                f"Successfully synced user on fallback: {user_profile.id}"
+                            )
+                        except Exception as sync_error:
+                            logger.warning(
+                                f"Failed to sync user on fallback: {sync_error}, "
+                                f"using existing user record"
+                            )
+                            # Continue with existing user
+            
             if not db_user:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,

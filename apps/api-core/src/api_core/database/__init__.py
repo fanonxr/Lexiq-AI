@@ -7,8 +7,10 @@ from api_core.database.connection import (
     get_engine,
 )
 from api_core.database.models import (
-    Base,
+    AgentConfig,
     Appointment,
+    Base,
+    CalendarIntegration,
     Call,
     Conversation,
     ConversationMessage,
@@ -37,6 +39,8 @@ __all__ = [
     "User",
     "Firm",
     "FirmPersona",
+    "AgentConfig",
+    "CalendarIntegration",
     "Plan",
     "Subscription",
     "Invoice",
