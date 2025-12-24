@@ -17,7 +17,7 @@
  *   if (isLoading) return <LoadingSpinner />;
  *   if (error) return <ErrorMessage error={error} />;
  * 
- *   return <div>{/* render knowledge base */}</div>;
+ *   return <div>render knowledge base</div>;
  * }
  * ```
  */

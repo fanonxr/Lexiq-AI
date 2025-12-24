@@ -7,7 +7,7 @@ from typing import List, Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api_core.database.models import Invoice, Subscription, UsageRecord
+from api_core.database.models import Call, Invoice, Subscription, UsageRecord
 from api_core.exceptions import NotFoundError
 from api_core.models.billing import UsageSummaryResponse
 from api_core.models.dashboard import (
@@ -20,6 +20,8 @@ from api_core.models.dashboard import (
     DashboardStats,
     SubscriptionStats,
     UsageStats,
+    VolumeDataPoint,
+    VolumeDataResponse,
 )
 from api_core.repositories.billing_repository import BillingRepository
 from api_core.services.billing_service import BillingService
@@ -146,15 +148,15 @@ class DashboardService:
         """
         # Determine period from subscription or use default
         if (
-            subscription_stats.has_active_subscription
-            and subscription_stats.current_period_start
-            and subscription_stats.current_period_end
+            subscription_stats.hasActiveSubscription
+            and subscription_stats.currentPeriodStart
+            and subscription_stats.currentPeriodEnd
         ):
             period_start = datetime.fromisoformat(
-                subscription_stats.current_period_start.replace("Z", "+00:00")
+                subscription_stats.currentPeriodStart.replace("Z", "+00:00")
             )
             period_end = datetime.fromisoformat(
-                subscription_stats.current_period_end.replace("Z", "+00:00")
+                subscription_stats.currentPeriodEnd.replace("Z", "+00:00")
             )
         else:
             # Default to last 30 days
@@ -208,15 +210,15 @@ class DashboardService:
         """
         # Determine period from subscription or use default
         if (
-            subscription_stats.has_active_subscription
-            and subscription_stats.current_period_start
-            and subscription_stats.current_period_end
+            subscription_stats.hasActiveSubscription
+            and subscription_stats.currentPeriodStart
+            and subscription_stats.currentPeriodEnd
         ):
             period_start = datetime.fromisoformat(
-                subscription_stats.current_period_start.replace("Z", "+00:00")
+                subscription_stats.currentPeriodStart.replace("Z", "+00:00")
             )
             period_end = datetime.fromisoformat(
-                subscription_stats.current_period_end.replace("Z", "+00:00")
+                subscription_stats.currentPeriodEnd.replace("Z", "+00:00")
             )
         else:
             # Default to last 30 days
@@ -439,6 +441,70 @@ class DashboardService:
             total=len(activities),
             limit=limit,
         )
+
+    async def get_volume_data(
+        self, user_id: str, date_from: datetime, date_to: datetime
+    ) -> VolumeDataResponse:
+        """
+        Get call volume data for a date range.
+
+        Aggregates calls by date to provide volume chart data.
+
+        Args:
+            user_id: User ID
+            date_from: Start date (inclusive)
+            date_to: End date (inclusive)
+
+        Returns:
+            VolumeDataResponse with daily call counts
+        """
+        try:
+            from sqlalchemy import func, cast, Date
+
+            # Query calls grouped by date
+            query = (
+                select(
+                    cast(Call.created_at, Date).label("date"),
+                    func.count(Call.id).label("count"),
+                )
+                .where(
+                    Call.user_id == user_id,
+                    Call.created_at >= date_from,
+                    Call.created_at <= date_to,
+                )
+                .group_by(cast(Call.created_at, Date))
+                .order_by(cast(Call.created_at, Date))
+            )
+
+            result = await self.session.execute(query)
+            rows = result.all()
+
+            # Convert to VolumeDataPoint list
+            data_points = [
+                VolumeDataPoint(date=row.date.isoformat(), value=row.count)
+                for row in rows
+            ]
+
+            # Fill in missing dates with 0
+            # Generate all dates in range
+            current_date = date_from.date()
+            end_date = date_to.date()
+            date_map = {point.date: point.value for point in data_points}
+
+            complete_data_points = []
+            while current_date <= end_date:
+                date_str = current_date.isoformat()
+                value = date_map.get(date_str, 0)
+                complete_data_points.append(
+                    VolumeDataPoint(date=date_str, value=value)
+                )
+                current_date += timedelta(days=1)
+
+            return VolumeDataResponse(data=complete_data_points)
+
+        except Exception as e:
+            logger.error(f"Error getting volume data for user {user_id}: {e}")
+            raise
 
 
 def get_dashboard_service(session: AsyncSession) -> DashboardService:

@@ -23,54 +23,49 @@ class LLMSettings(BaseSettings):
 
     default_model_name: str = Field(
         default="azure/gpt-4o",
-        description="Default LLM model name (LiteLLM format)",
-        alias="DEFAULT_MODEL_NAME",
+        description="Default LLM model name (LiteLLM format). Env var: DEFAULT_MODEL_NAME",
     )
     fallback_model_name: str = Field(
         default="anthropic/claude-3-haiku",
-        description="Fallback LLM model name (LiteLLM format)",
-        alias="FALLBACK_MODEL_NAME",
+        description="Fallback LLM model name (LiteLLM format). Env var: FALLBACK_MODEL_NAME",
     )
     enable_fallbacks: bool = Field(
         default=True,
-        description="Enable automatic fallback to secondary model on failure",
-        alias="ENABLE_FALLBACKS",
+        description="Enable automatic fallback to secondary model on failure. Env var: ENABLE_FALLBACKS",
     )
 
     # Azure OpenAI
     azure_api_key: Optional[str] = Field(
-        default=None, description="Azure OpenAI API key", alias="AZURE_API_KEY"
+        default=None, description="Azure OpenAI API key. Env var: AZURE_API_KEY"
     )
     azure_api_base: Optional[str] = Field(
-        default=None, description="Azure OpenAI endpoint URL", alias="AZURE_API_BASE"
+        default=None, description="Azure OpenAI endpoint URL. Env var: AZURE_API_BASE"
     )
     azure_api_version: str = Field(
         default="2024-02-15-preview",
-        description="Azure OpenAI API version",
-        alias="AZURE_API_VERSION",
+        description="Azure OpenAI API version. Env var: AZURE_API_VERSION",
     )
 
     # Anthropic
     anthropic_api_key: Optional[str] = Field(
-        default=None, description="Anthropic API key", alias="ANTHROPIC_API_KEY"
+        default=None, description="Anthropic API key. Env var: ANTHROPIC_API_KEY"
     )
 
     # AWS Bedrock (optional)
     aws_access_key_id: Optional[str] = Field(
-        default=None, description="AWS access key ID for Bedrock", alias="AWS_ACCESS_KEY_ID"
+        default=None, description="AWS access key ID for Bedrock. Env var: AWS_ACCESS_KEY_ID"
     )
     aws_secret_access_key: Optional[str] = Field(
         default=None,
-        description="AWS secret access key for Bedrock",
-        alias="AWS_SECRET_ACCESS_KEY",
+        description="AWS secret access key for Bedrock. Env var: AWS_SECRET_ACCESS_KEY",
     )
     aws_region: Optional[str] = Field(
-        default=None, description="AWS region for Bedrock", alias="AWS_REGION"
+        default=None, description="AWS region for Bedrock. Env var: AWS_REGION"
     )
 
     # Groq (optional)
     groq_api_key: Optional[str] = Field(
-        default=None, description="Groq API key", alias="GROQ_API_KEY"
+        default=None, description="Groq API key. Env var: GROQ_API_KEY"
     )
 
     @property
@@ -112,8 +107,7 @@ class RedisSettings(BaseSettings):
     )
     conversation_ttl: int = Field(
         default=3600,
-        description="Conversation state TTL in seconds",
-        alias="CONVERSATION_TTL",
+        description="Conversation state TTL in seconds. Env var: REDIS_conversation_ttl",
     )
 
 
@@ -126,7 +120,7 @@ class QdrantSettings(BaseSettings):
         default="http://localhost:6333", description="Qdrant connection URL"
     )
     api_key: Optional[str] = Field(
-        default=None, description="Qdrant API key (for Qdrant Cloud)", alias="API_KEY"
+        default=None, description="Qdrant API key (for Qdrant Cloud). Env var: QDRANT_api_key"
     )
     timeout: int = Field(default=30, description="Request timeout in seconds")
     prefer_grpc: bool = Field(
@@ -144,10 +138,10 @@ class ServerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
 
-    host: str = Field(default="0.0.0.0", description="Server host", alias="HOST")
-    port: int = Field(default=8001, description="HTTP server port", alias="PORT")
+    host: str = Field(default="0.0.0.0", description="Server host. Env var: HOST")
+    port: int = Field(default=8001, description="HTTP server port. Env var: PORT")
     grpc_port: int = Field(
-        default=50051, description="gRPC server port", alias="GRPC_PORT"
+        default=50051, description="gRPC server port. Env var: GRPC_PORT"
     )
     reload: bool = Field(
         default=False, description="Enable auto-reload (development only)"
@@ -162,28 +156,24 @@ class IntegrationSettings(BaseSettings):
     # Core API
     core_api_url: str = Field(
         default="http://localhost:8000",
-        description="Core API service URL",
-        alias="CORE_API_URL",
+        description="Core API service URL. Env var: CORE_API_URL",
     )
     core_api_timeout: int = Field(
-        default=30, description="Core API request timeout in seconds", alias="CORE_API_TIMEOUT"
+        default=30, description="Core API request timeout in seconds. Env var: CORE_API_TIMEOUT"
     )
     core_api_api_key: Optional[str] = Field(
         default=None,
-        description="Optional internal API key for Core API (sent as X-Internal-API-Key)",
-        alias="CORE_API_API_KEY",
+        description="Optional internal API key for Core API (sent as X-Internal-API-Key). Env var: CORE_API_API_KEY",
     )
 
     # Integration Worker
     integration_worker_url: str = Field(
         default="http://localhost:8002",
-        description="Integration Worker service URL",
-        alias="INTEGRATION_WORKER_URL",
+        description="Integration Worker service URL. Env var: INTEGRATION_WORKER_URL",
     )
     integration_worker_timeout: int = Field(
         default=30,
-        description="Integration Worker request timeout in seconds",
-        alias="INTEGRATION_WORKER_TIMEOUT",
+        description="Integration Worker request timeout in seconds. Env var: INTEGRATION_WORKER_TIMEOUT",
     )
 
 
@@ -194,13 +184,11 @@ class ContextWindowSettings(BaseSettings):
 
     max_context_window: int = Field(
         default=8000,
-        description="Maximum context window size in tokens",
-        alias="MAX_CONTEXT_WINDOW",
+        description="Maximum context window size in tokens. Env var: MAX_CONTEXT_WINDOW",
     )
     max_history_messages: int = Field(
         default=50,
-        description="Maximum number of messages to keep in conversation history",
-        alias="MAX_HISTORY_MESSAGES",
+        description="Maximum number of messages to keep in conversation history. Env var: MAX_HISTORY_MESSAGES",
     )
 
 
@@ -212,21 +200,18 @@ class CorsSettings(BaseSettings):
     # Store as strings to avoid JSON parsing issues
     origins_str: str = Field(
         default="http://localhost:3000",
-        alias="origins",
-        description="Allowed CORS origins (comma-separated string)",
+        description="Allowed CORS origins (comma-separated string). Env var: CORS_origins",
     )
     allow_credentials: bool = Field(
         default=True, description="Allow credentials in CORS"
     )
     allow_methods_str: str = Field(
         default="GET,POST,PUT,DELETE,OPTIONS,PATCH",
-        alias="allow_methods",
-        description="Allowed HTTP methods (comma-separated string)",
+        description="Allowed HTTP methods (comma-separated string). Env var: CORS_allow_methods",
     )
     allow_headers_str: str = Field(
         default="*",
-        alias="allow_headers",
-        description="Allowed HTTP headers (comma-separated string)",
+        description="Allowed HTTP headers (comma-separated string). Env var: CORS_allow_headers",
     )
     max_age: int = Field(
         default=3600, description="CORS preflight cache max age in seconds"
@@ -283,24 +268,33 @@ class GRPCSettings(BaseSettings):
     # Remove env_prefix to avoid conflicts - we'll use explicit aliases instead
     model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
 
-    enabled: bool = Field(
+    grpc_enabled: bool = Field(
         default=True,
-        description="Enable gRPC server",
-        alias="GRPC_ENABLED",
+        description="Enable gRPC server. Env var: GRPC_ENABLED",
     )
-    port: int = Field(
+    grpc_port: int = Field(
         default=50051,
-        description="gRPC server port",
-        # Explicitly use GRPC_PORT (env_prefix="GRPC_" + alias="PORT" = "GRPC_PORT")
-        # But to avoid conflicts, we'll use a different approach: remove the prefix
-        # and use the full name as alias
-        alias="GRPC_PORT",
+        description="gRPC server port. Env var: GRPC_PORT",
     )
-    max_workers: int = Field(
+    grpc_max_workers: int = Field(
         default=10,
-        description="Maximum number of worker threads for gRPC server",
-        alias="GRPC_MAX_WORKERS",
+        description="Maximum number of worker threads for gRPC server. Env var: GRPC_MAX_WORKERS",
     )
+
+    @property
+    def enabled(self) -> bool:
+        """Backward compatibility property."""
+        return self.grpc_enabled
+
+    @property
+    def port(self) -> int:
+        """Backward compatibility property."""
+        return self.grpc_port
+
+    @property
+    def max_workers(self) -> int:
+        """Backward compatibility property."""
+        return self.grpc_max_workers
 
 
 class Settings(BaseSettings):
@@ -315,16 +309,15 @@ class Settings(BaseSettings):
 
     # Application settings
     app_name: str = Field(
-        default="cognitive-orch", description="Application name", alias="APP_NAME"
+        default="cognitive-orch", description="Application name. Env var: APP_NAME"
     )
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
-        description="Application environment",
-        alias="ENVIRONMENT",
+        description="Application environment. Env var: ENVIRONMENT",
     )
-    debug: bool = Field(default=False, description="Enable debug mode", alias="DEBUG")
+    debug: bool = Field(default=False, description="Enable debug mode. Env var: DEBUG")
     log_level: str = Field(
-        default="INFO", description="Logging level", alias="LOG_LEVEL"
+        default="INFO", description="Logging level. Env var: LOG_LEVEL"
     )
 
     # Sub-settings

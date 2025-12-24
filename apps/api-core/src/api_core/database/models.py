@@ -105,6 +105,12 @@ class User(Base):
     calls: Mapped[list["Call"]] = relationship(
         "Call", back_populates="user", cascade="all, delete-orphan"
     )
+    agent_configs: Mapped[list["AgentConfig"]] = relationship(
+        "AgentConfig", back_populates="user", cascade="all, delete-orphan"
+    )
+    calendar_integrations: Mapped[list["CalendarIntegration"]] = relationship(
+        "CalendarIntegration", back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         """String representation of User."""
@@ -462,12 +468,28 @@ class Appointment(Base):
     # Idempotency
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
 
+    # Calendar integration source tracking
+    source_calendar_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("calendar_integrations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_event_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )  # Outlook/Google event ID
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    # Relationships
+    source_calendar: Mapped[Optional["CalendarIntegration"]] = relationship(
+        "CalendarIntegration"
     )
 
     def __repr__(self) -> str:
@@ -613,6 +635,129 @@ class Firm(Base):
 
     def __repr__(self) -> str:
         return f"<Firm(id={self.id}, name={self.name})>"
+
+
+class AgentConfig(Base):
+    """Agent configuration database model for user/firm-specific agent settings."""
+
+    __tablename__ = "agent_configs"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Foreign keys
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    firm_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("firms.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    # Voice configuration
+    voice_id: Mapped[str] = mapped_column(String(100), nullable=False, default="1")
+
+    # Scripts
+    greeting_script: Mapped[str] = mapped_column(
+        Text, nullable=False, default="Hello, thank you for calling. How can I assist you today?"
+    )
+    closing_script: Mapped[str] = mapped_column(
+        Text, nullable=False, default="Thank you for calling. Have a great day!"
+    )
+    transfer_script: Mapped[str] = mapped_column(
+        Text, nullable=False, default="Let me transfer you to someone who can better assist you."
+    )
+
+    # Behavior settings
+    auto_respond: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    record_calls: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    auto_transcribe: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    enable_voicemail: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="agent_configs")
+    firm: Mapped[Optional["Firm"]] = relationship("Firm")
+
+    def __repr__(self) -> str:
+        return f"<AgentConfig(id={self.id}, user_id={self.user_id}, firm_id={self.firm_id})>"
+
+
+class CalendarIntegration(Base):
+    """Calendar integration database model (Outlook/Google Calendar)."""
+
+    __tablename__ = "calendar_integrations"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Foreign key
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Integration details
+    integration_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # "outlook" or "google"
+
+    # OAuth tokens (should be encrypted in production)
+    access_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Encrypted
+    refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Encrypted
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Calendar information
+    calendar_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Outlook calendar ID
+    email: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # User's email for this calendar
+
+    # Status
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="calendar_integrations")
+
+    def __repr__(self) -> str:
+        return f"<CalendarIntegration(id={self.id}, user_id={self.user_id}, type={self.integration_type})>"
 
 
 class Conversation(Base):

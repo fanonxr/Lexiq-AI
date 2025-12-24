@@ -11,6 +11,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Phone, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCalls, useCallDetails, useAudioUrl } from "@/hooks/useInbox";
 
 // Lazy load heavy audio player component (includes wavesurfer.js)
 const AudioPlayer = lazy(() => 
@@ -45,116 +46,50 @@ export default function RecordingsPage() {
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const audioPlayerRef = useRef<AudioPlayerRef>(null);
-  // Loading state - will be replaced with actual hook loading states
-  const [isLoadingCalls, setIsLoadingCalls] = useState(false);
-  // Error state - will be replaced with actual hook error states
-  const [callsError, setCallsError] = useState<Error | null>(null);
 
-  // Mock call data - will be replaced with API calls later
-  const mockCalls: Call[] = useMemo(
-    () => [
-      {
-        id: "1",
-        callerName: "John Doe",
-        status: "new_client",
-        summary: "Inquiry about estate planning services and will preparation...",
-        timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-        phoneNumber: "+1 (555) 123-4567",
-        duration: 180,
-      },
-      {
-        id: "2",
-        callerName: "Sarah Smith",
-        status: "lead",
-        summary: "Interested in business law consultation for startup incorporation...",
-        timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
-        phoneNumber: "+1 (555) 234-5678",
-        duration: 240,
-      },
-      {
-        id: "3",
-        callerName: "Michael Johnson",
-        status: "unread",
-        summary: "Follow-up call regarding contract review and negotiation terms...",
-        timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
-        phoneNumber: "+1 (555) 345-6789",
-        duration: 320,
-      },
-      {
-        id: "4",
-        callerName: "Emily Davis",
-        status: "existing_client",
-        summary: "Routine check-in about ongoing litigation case status...",
-        timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-        phoneNumber: "+1 (555) 456-7890",
-        duration: 150,
-      },
-      {
-        id: "5",
-        callerName: "Unknown Caller",
-        status: "spam",
-        summary: "Automated call about extended warranty for vehicle...",
-        timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
-        phoneNumber: "+1 (555) 000-0000",
-        duration: 45,
-      },
-    ],
-    []
-  );
+  // Fetch calls using hooks
+  const { data: calls, isLoading: isLoadingCalls, error: callsError, refetch: refetchCalls } = useCalls(activeFilter);
+  const { data: callDetails, isLoading: isLoadingCallDetails } = useCallDetails(selectedCallId);
+  const { data: audioUrl } = useAudioUrl(selectedCallId);
 
-  // Filter calls based on active filter
+  // Filter calls based on active filter (already filtered by API, but ensure consistency)
   const filteredCalls = useMemo(() => {
-    if (activeFilter === "all") return mockCalls;
-    if (activeFilter === "unread") {
-      return mockCalls.filter((call) => call.status === "unread");
-    }
-    if (activeFilter === "leads") {
-      return mockCalls.filter((call) => call.status === "lead");
-    }
-    if (activeFilter === "spam") {
-      return mockCalls.filter((call) => call.status === "spam");
-    }
-    return mockCalls;
-  }, [activeFilter, mockCalls]);
+    if (!calls) return [];
+    if (activeFilter === "all") return calls;
+    return calls.filter((call) => {
+      if (activeFilter === "unread") return call.status === "unread";
+      if (activeFilter === "leads") return call.status === "lead";
+      if (activeFilter === "spam") return call.status === "spam";
+      return true;
+    });
+  }, [activeFilter, calls]);
 
   // Get selected call data
   const selectedCall = useMemo(() => {
-    if (!selectedCallId) return null;
-    return mockCalls.find((call) => call.id === selectedCallId) || null;
-  }, [selectedCallId, mockCalls]);
+    if (!selectedCallId || !calls) return null;
+    return calls.find((call) => call.id === selectedCallId) || null;
+  }, [selectedCallId, calls]);
 
-  // Mock transcript data for selected call
-  const mockTranscript: TranscriptSegment[] = useMemo(() => {
-    if (!selectedCall) return [];
-    return [
-      { start: 0, end: 5, text: "Hello, thank you for calling. How can I assist you today?", speaker: "AI" },
-      { start: 5, end: 12, text: "Hi, I'm interested in learning more about your estate planning services.", speaker: "Caller" },
-      { start: 12, end: 20, text: "I'd be happy to help with that. Are you looking to create a will, or do you need assistance with trust planning?", speaker: "AI" },
-      { start: 20, end: 28, text: "I'm not sure yet. This is my first time dealing with estate planning, so I'd like to understand my options.", speaker: "Caller" },
-      { start: 28, end: 35, text: "That's perfectly fine. We offer a free consultation where we can discuss your specific needs and answer any questions you may have.", speaker: "AI" },
-    ];
-  }, [selectedCall]);
+  // Get transcript and summary from call details
+  const transcript = useMemo(() => {
+    return callDetails?.transcript || [];
+  }, [callDetails]);
 
-  // Mock summary data
-  const mockSummary = useMemo(() => {
-    if (!selectedCall) return [];
-    return [
-      "Client inquired about estate planning services",
-      "First-time caller seeking information about will and trust options",
-      "Expressed interest in free consultation",
-      "No immediate urgency, exploring options",
-    ];
-  }, [selectedCall]);
+  const summary = useMemo(() => {
+    return callDetails?.summary || [];
+  }, [callDetails]);
 
-  // Calculate filter counts
+  // Calculate filter counts (from API response if available, otherwise from calls)
   const filterCounts = useMemo(() => {
+    // TODO: Get counts from API response when available
+    if (!calls) return { all: 0, unread: 0, leads: 0, spam: 0 };
     return {
-      all: mockCalls.length,
-      unread: mockCalls.filter((call) => call.status === "unread").length,
-      leads: mockCalls.filter((call) => call.status === "lead").length,
-      spam: mockCalls.filter((call) => call.status === "spam").length,
+      all: calls.length,
+      unread: calls.filter((call) => call.status === "unread").length,
+      leads: calls.filter((call) => call.status === "lead").length,
+      spam: calls.filter((call) => call.status === "spam").length,
     };
-  }, [mockCalls]);
+  }, [calls]);
 
   // Memoize time update handler to prevent unnecessary re-renders
   const handleTimeUpdate = useCallback((time: number) => {
@@ -261,10 +196,7 @@ export default function RecordingsPage() {
             <div className="p-4">
               <ErrorState
                 error={callsError}
-                onRetry={() => {
-                  setCallsError(null);
-                  // In real implementation, this would call refetch()
-                }}
+                onRetry={refetchCalls}
                 title="Failed to load calls"
                 inline
               />
@@ -319,11 +251,9 @@ export default function RecordingsPage() {
                 </h2>
                 <AudioPlayer
                   ref={audioPlayerRef}
-                  // audioUrl will be available once API is implemented
-                  // For now, leaving it undefined to show placeholder
-                  audioUrl={undefined}
-                    transcript={mockTranscript}
-                    onTimeUpdate={handleTimeUpdate}
+                  audioUrl={audioUrl || undefined}
+                  transcript={transcript}
+                  onTimeUpdate={handleTimeUpdate}
                 />
               </div>
               <div className="flex-shrink-0">
@@ -337,16 +267,28 @@ export default function RecordingsPage() {
             </div>
 
             {/* Smart Summary Card */}
-            <SmartSummary summary={mockSummary} />
+            {isLoadingCallDetails ? (
+              <div className="h-32 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-800" />
+            ) : (
+              <SmartSummary summary={summary} />
+            )}
 
             {/* Transcript Accordion */}
-            <Transcript
-              transcript={mockTranscript}
-              currentTime={currentTime}
-              onSentenceClick={(time) => {
-                audioPlayerRef.current?.jumpToTime(time);
-              }}
-            />
+            {isLoadingCallDetails ? (
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-16 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+                ))}
+              </div>
+            ) : (
+              <Transcript
+                transcript={transcript}
+                currentTime={currentTime}
+                onSentenceClick={(time) => {
+                  audioPlayerRef.current?.jumpToTime(time);
+                }}
+              />
+            )}
           </>
         ) : (
           <div className="flex h-full items-center justify-center">
@@ -380,11 +322,9 @@ export default function RecordingsPage() {
             <div className="space-y-4">
               <AudioPlayer
                 ref={audioPlayerRef}
-                // audioUrl will be available once API is implemented
-                // For now, leaving it undefined to show placeholder
-                audioUrl={undefined}
-                    transcript={mockTranscript}
-                    onTimeUpdate={handleTimeUpdate}
+                audioUrl={audioUrl || undefined}
+                transcript={transcript}
+                onTimeUpdate={handleTimeUpdate}
               />
               <ActionToolbar
                 onCall={() => console.log("Call clicked")}
@@ -392,14 +332,26 @@ export default function RecordingsPage() {
                 onArchive={() => console.log("Archive clicked")}
                 onExport={() => console.log("Export clicked")}
               />
-              <SmartSummary summary={mockSummary} />
-              <Transcript
-                transcript={mockTranscript}
-                currentTime={currentTime}
-                onSentenceClick={(time) => {
-                  audioPlayerRef.current?.jumpToTime(time);
-                }}
-              />
+              {isLoadingCallDetails ? (
+                <div className="h-32 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-800" />
+              ) : (
+                <SmartSummary summary={summary} />
+              )}
+              {isLoadingCallDetails ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="h-16 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+                  ))}
+                </div>
+              ) : (
+                <Transcript
+                  transcript={transcript}
+                  currentTime={currentTime}
+                  onSentenceClick={(time) => {
+                    audioPlayerRef.current?.jumpToTime(time);
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>

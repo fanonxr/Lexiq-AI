@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
 import { Alert } from "@/components/ui/Alert";
 import { Trash2, Save, Key, User, AlertTriangle } from "lucide-react";
+import { fetchUserProfile, updateUserProfile, terminateAccount } from "@/lib/api/users";
+import { useAuthContext } from "@/contexts/AuthContext";
+import { useRouter } from "next/navigation";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
@@ -17,11 +20,16 @@ export const dynamic = "force-dynamic";
  * Allows users to manage their account information and preferences.
  */
 export default function SettingsPage() {
+  const { logout } = useAuthContext();
+  const router = useRouter();
+
   // Profile state
-  const [name, setName] = useState("John Doe");
-  const [email, setEmail] = useState("john.doe@example.com");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState("");
@@ -34,23 +42,57 @@ export default function SettingsPage() {
   const [showTerminateConfirm, setShowTerminateConfirm] = useState(false);
   const [terminateConfirmText, setTerminateConfirmText] = useState("");
   const [isTerminating, setIsTerminating] = useState(false);
+  const [terminateError, setTerminateError] = useState<string | null>(null);
+
+  /**
+   * Load user profile on mount
+   */
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        setIsLoadingProfile(true);
+        setProfileError(null);
+        const profile = await fetchUserProfile();
+        setName(profile.name || "");
+        setEmail(profile.email || "");
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Failed to load profile";
+        setProfileError(errorMessage);
+        console.error("Error loading profile:", error);
+      } finally {
+        setIsLoadingProfile(false);
+      }
+    };
+
+    loadProfile();
+  }, []);
 
   /**
    * Handle profile save
    */
   const handleSaveProfile = useCallback(async () => {
-    setIsSavingProfile(true);
-    
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    
-    // Mock save - in real implementation, this would call the API
-    console.log("Saving profile:", { name, email });
-    
-    setIsSavingProfile(false);
-    setProfileSaved(true);
-    
-    setTimeout(() => setProfileSaved(false), 3000);
+    try {
+      setIsSavingProfile(true);
+      setProfileError(null);
+      
+      const updatedProfile = await updateUserProfile({
+        name: name || undefined,
+        email: email || undefined,
+      });
+      
+      // Update local state with response
+      setName(updatedProfile.name || "");
+      setEmail(updatedProfile.email || "");
+      
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(false), 3000);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to save profile";
+      setProfileError(errorMessage);
+      console.error("Error saving profile:", error);
+    } finally {
+      setIsSavingProfile(false);
+    }
   }, [name, email]);
 
   /**
@@ -98,25 +140,29 @@ export default function SettingsPage() {
    */
   const handleTerminateAccount = useCallback(async () => {
     if (terminateConfirmText !== "DELETE") {
-      setPasswordError("Please type DELETE to confirm");
+      setTerminateError("Please type DELETE to confirm");
       return;
     }
 
-    setIsTerminating(true);
-    
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    // Mock account termination - in real implementation, this would call the API
-    console.log("Terminating account");
-    
-    // In real implementation, this would redirect to logout or home page
-    alert("Account terminated. You will be logged out.");
-    
-    setIsTerminating(false);
-    setShowTerminateConfirm(false);
-    setTerminateConfirmText("");
-  }, [terminateConfirmText]);
+    try {
+      setIsTerminating(true);
+      setTerminateError(null);
+      
+      await terminateAccount();
+      
+      // Logout and redirect to home
+      await logout();
+      router.push("/");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to terminate account";
+      setTerminateError(errorMessage);
+      console.error("Error terminating account:", error);
+    } finally {
+      setIsTerminating(false);
+      setShowTerminateConfirm(false);
+      setTerminateConfirmText("");
+    }
+  }, [terminateConfirmText, logout, router]);
 
   return (
     <div className="space-y-6">
@@ -175,10 +221,15 @@ export default function SettingsPage() {
               {profileSaved && (
                 <span className="text-sm text-green-600">Profile saved successfully</span>
               )}
+              {profileError && (
+                <Alert variant="error" title="Error" className="mt-2">
+                  {profileError}
+                </Alert>
+              )}
             </div>
             <Button
               onClick={handleSaveProfile}
-              disabled={isSavingProfile}
+              disabled={isSavingProfile || isLoadingProfile}
               className="gap-2"
             >
               {isSavingProfile ? (
@@ -305,6 +356,12 @@ export default function SettingsPage() {
                   This action cannot be undone. All your data will be permanently deleted.
                 </Alert>
 
+                {terminateError && (
+                  <Alert variant="error" title="Error">
+                    {terminateError}
+                  </Alert>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="terminate-confirm">
                     Type <strong>DELETE</strong> to confirm
@@ -313,7 +370,10 @@ export default function SettingsPage() {
                     id="terminate-confirm"
                     type="text"
                     value={terminateConfirmText}
-                    onChange={(e) => setTerminateConfirmText(e.target.value)}
+                    onChange={(e) => {
+                      setTerminateConfirmText(e.target.value);
+                      setTerminateError(null);
+                    }}
                     placeholder="Type DELETE to confirm"
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   />
@@ -340,7 +400,7 @@ export default function SettingsPage() {
                     onClick={() => {
                       setShowTerminateConfirm(false);
                       setTerminateConfirmText("");
-                      setPasswordError(null);
+                      setTerminateError(null);
                     }}
                     disabled={isTerminating}
                   >

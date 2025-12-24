@@ -17,7 +17,7 @@
  *   if (isLoading) return <LoadingSpinner />;
  *   if (error) return <ErrorMessage error={error} />;
  * 
- *   return <div>{/* render agent config */}</div>;
+ *   return <div>Render agent config here</div>;
  * }
  * ```
  */

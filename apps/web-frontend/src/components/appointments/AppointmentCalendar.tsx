@@ -73,13 +73,18 @@ export function AppointmentCalendar({
   // Group appointments by date for quick lookup
   const appointmentsByDate = React.useMemo(() => {
     const grouped: Record<string, Appointment[]> = {};
-    appointments.forEach((apt) => {
-      const dateKey = format(apt.dateTime, "yyyy-MM-dd");
-      if (!grouped[dateKey]) {
-        grouped[dateKey] = [];
-      }
-      grouped[dateKey].push(apt);
-    });
+    if (appointments && Array.isArray(appointments)) {
+      appointments.forEach((apt) => {
+        const dateKey = format(
+          typeof apt.dateTime === 'string' ? new Date(apt.dateTime) : apt.dateTime,
+          "yyyy-MM-dd"
+        );
+        if (!grouped[dateKey]) {
+          grouped[dateKey] = [];
+        }
+        grouped[dateKey].push(apt);
+      });
+    }
     return grouped;
   }, [appointments]);
 

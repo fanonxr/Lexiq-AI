@@ -9,6 +9,7 @@ from api_core.repositories.billing_repository import (
     UsageRecordRepository,
 )
 from api_core.repositories.user_repository import UserRepository
+from api_core.repositories.calendar_integration_repository import CalendarIntegrationRepository
 
 __all__ = [
     "BaseRepository",
@@ -18,4 +19,5 @@ __all__ = [
     "SubscriptionRepository",
     "InvoiceRepository",
     "UsageRecordRepository",
+    "CalendarIntegrationRepository",
 ]

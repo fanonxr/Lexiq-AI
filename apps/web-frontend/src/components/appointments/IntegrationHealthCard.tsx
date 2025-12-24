@@ -33,11 +33,15 @@ export interface IntegrationHealthCardProps {
   /**
    * Last sync timestamp
    */
-  lastSynced: Date;
+  lastSynced: Date | null;
   /**
    * Callback when refresh is clicked
    */
   onRefresh?: () => void | Promise<void>;
+  /**
+   * Callback when connect is clicked
+   */
+  onConnect?: () => void | Promise<void>;
   /**
    * Whether sync is in progress
    * @default false
@@ -81,11 +85,14 @@ export function IntegrationHealthCard({
   integration,
   lastSynced,
   onRefresh,
+  onConnect,
   isSyncing = false,
   isConnected = true,
   className,
 }: IntegrationHealthCardProps) {
-  const formattedTime = formatDistanceToNow(lastSynced, { addSuffix: true });
+  const formattedTime = lastSynced
+    ? formatDistanceToNow(lastSynced, { addSuffix: true })
+    : "Never";
 
   return (
     <div
@@ -120,33 +127,47 @@ export function IntegrationHealthCard({
         </div>
 
         {/* Last synced time */}
-        <span className="text-sm text-muted-foreground">
-          Last synced {formattedTime}
-        </span>
+        {isConnected && (
+          <span className="text-sm text-muted-foreground">
+            Last synced {formattedTime}
+          </span>
+        )}
       </div>
 
-      {/* Right side: Refresh button */}
-      {onRefresh && (
+      {/* Right side: Connect or Refresh button */}
+      {!isConnected && onConnect ? (
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
-          onClick={onRefresh}
-          disabled={isSyncing}
+          onClick={onConnect}
           className="gap-2"
-          aria-label="Refresh calendar sync"
+          aria-label={`Connect ${getIntegrationName(integration)}`}
         >
-          {isSyncing ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="hidden sm:inline">Syncing...</span>
-            </>
-          ) : (
-            <>
-              <RefreshCw className="h-4 w-4" />
-              <span className="hidden sm:inline">Refresh</span>
-            </>
-          )}
+          Connect {getIntegrationName(integration)}
         </Button>
+      ) : (
+        onRefresh && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onRefresh}
+            disabled={isSyncing}
+            className="gap-2"
+            aria-label="Refresh calendar sync"
+          >
+            {isSyncing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="hidden sm:inline">Syncing...</span>
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                <span className="hidden sm:inline">Refresh</span>
+              </>
+            )}
+          </Button>
+        )
       )}
     </div>
   );

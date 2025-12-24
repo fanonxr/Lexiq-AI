@@ -55,10 +55,16 @@ async def lifespan(app: FastAPI):
         # For now, Redis connections are created when needed
         logger.info("Redis will be connected on-demand")
 
-        # Azure AD B2C client initialization
+        # Azure AD B2C / Entra ID client initialization
         # Note: AzureADB2CClient uses lazy initialization for JWKS fetching
         # No explicit startup needed - JWKS are fetched on first token validation
-        logger.info("Azure AD B2C client will initialize on first use")
+        from api_core.config import get_settings
+        settings = get_settings()
+        if settings.azure_ad_b2c.is_configured:
+            auth_type = "Azure AD B2C" if settings.azure_ad_b2c.is_b2c else "Microsoft Entra ID"
+            logger.info(f"{auth_type} client will initialize on first use")
+        else:
+            logger.warning("Azure AD B2C / Entra ID is not configured - token validation will fail")
 
         # RabbitMQ publisher for ingestion jobs
         try:
@@ -287,10 +293,68 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 async def health_check():
     """Health check endpoint."""
     logger.debug("Health check requested")
+    from api_core.config import get_settings
+    settings = get_settings()
+    
+    # Check auth configuration
+    auth_config = {
+        "configured": settings.azure_ad_b2c.is_configured,
+        "type": "Azure AD B2C" if settings.azure_ad_b2c.is_b2c else "Microsoft Entra ID" if settings.azure_ad_b2c.is_configured else "Not configured",
+        "has_tenant_id": bool(settings.azure_ad_b2c.tenant_id),
+        "has_client_id": bool(settings.azure_ad_b2c.client_id),
+    }
+    
     return {
         "status": "healthy",
         "app_name": settings.app_name,
         "environment": settings.environment.value,
+        "auth": auth_config,
+    }
+
+
+@app.get("/debug/storage")
+async def debug_storage():
+    """Debug endpoint to check storage configuration."""
+    from api_core.config import get_settings
+    settings = get_settings()
+    storage = settings.storage
+    
+    return {
+        "configured": storage.is_configured,
+        "account_name": storage.account_name,
+        "has_connection_string": bool(storage.connection_string),
+        "connection_string_preview": storage.connection_string[:50] + "..." if storage.connection_string and len(storage.connection_string) > 50 else storage.connection_string,
+        "has_account_key": bool(storage.account_key),
+        "use_managed_identity": storage.use_managed_identity,
+    }
+
+@app.get("/debug/auth")
+async def debug_auth_config():
+    """Debug endpoint to check authentication configuration (development only)."""
+    from api_core.config import get_settings
+    settings = get_settings()
+    
+    if settings.is_production:
+        return {"error": "This endpoint is only available in development"}
+    
+    auth_config = settings.azure_ad_b2c
+    
+    return {
+        "configured": auth_config.is_configured,
+        "is_b2c": auth_config.is_b2c,
+        "type": "Azure AD B2C" if auth_config.is_b2c else "Microsoft Entra ID" if auth_config.is_configured else "Not configured",
+        "tenant_id": auth_config.tenant_id,
+        "client_id": auth_config.client_id,
+        "has_policy": bool(auth_config.policy_signup_signin),
+        "instance": auth_config.instance,
+        "authority": auth_config.authority,
+        "has_client_secret": bool(auth_config.client_secret),
+        "client_secret_length": len(auth_config.client_secret) if auth_config.client_secret else 0,
+        "jwks_url": None if not auth_config.is_configured else (
+            f"{auth_config.instance}/{auth_config.tenant_id}/discovery/v2.0/keys" 
+            if not auth_config.is_b2c 
+            else f"{auth_config.instance.format(tenant=auth_config.tenant_id)}/{auth_config.tenant_id}/{auth_config.policy_signup_signin}/discovery/v2.0/keys"
+        ),
     }
 
 

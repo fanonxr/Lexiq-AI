@@ -130,7 +130,8 @@ export function VoiceLabGrid({
     }
   };
 
-  if (voices.length === 0) {
+  // Handle null/undefined voices
+  if (!voices || voices.length === 0) {
     return (
       <div className={cn("text-sm text-muted-foreground p-4", className)}>
         No voices available

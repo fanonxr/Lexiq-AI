@@ -5,10 +5,20 @@ import { IntegrationHealthCard, type IntegrationType } from "@/components/appoin
 import { AppointmentList, type Appointment } from "@/components/appointments/AppointmentList";
 import { AppointmentListSkeleton } from "@/components/appointments/AppointmentListSkeleton";
 import { AppointmentCalendar } from "@/components/appointments/AppointmentCalendar";
+import { WeeklyCalendarView } from "@/components/appointments/WeeklyCalendarView";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  useAppointments,
+  useIntegrationStatus,
+  useSyncAppointments,
+  useUpdateAppointment,
+  useCancelAppointment,
+  useAppointmentSources,
+} from "@/hooks/useAppointments";
+import { initiateOutlookOAuth } from "@/lib/api/calendar-integrations";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
@@ -24,116 +34,123 @@ export const dynamic = "force-dynamic";
  * - Appointment List (below)
  */
 export default function AppointmentsPage() {
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSynced, setLastSynced] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  // Loading state - will be replaced with actual hook loading states
-  const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
-  // Error state - will be replaced with actual hook error states
-  const [appointmentsError, setAppointmentsError] = useState<Error | null>(null);
 
-  // Mock appointments data
-  const mockAppointments: Appointment[] = useMemo(
-    () => [
-      {
-        id: "1",
-        clientName: "John Smith",
-        clientEmail: "john.smith@example.com",
-        dateTime: new Date("2024-12-20T14:30:00"),
-        type: "consultation",
-        status: "confirmed",
-        description: "Initial consultation for estate planning",
-      },
-      {
-        id: "2",
-        clientName: "Sarah Johnson",
-        clientEmail: "sarah.j@example.com",
-        dateTime: new Date("2024-12-21T10:00:00"),
-        type: "follow-up",
-        status: "proposed",
-        description: "Follow-up on contract review",
-      },
-      {
-        id: "3",
-        clientName: "Michael Chen",
-        clientEmail: "m.chen@example.com",
-        dateTime: new Date("2024-12-22T15:45:00"),
-        type: "consultation",
-        status: "rescheduled",
-        description: "Business incorporation consultation",
-      },
-      {
-        id: "4",
-        clientName: "Emily Davis",
-        clientEmail: "emily.davis@example.com",
-        dateTime: new Date("2024-12-23T09:30:00"),
-        type: "meeting",
-        status: "confirmed",
-        description: "Team meeting",
-      },
-      {
-        id: "5",
-        clientName: "Robert Williams",
-        clientEmail: "r.williams@example.com",
-        dateTime: new Date("2024-12-24T11:00:00"),
-        type: "consultation",
-        status: "cancelled",
-        description: "Cancelled consultation",
-      },
-    ],
-    []
-  );
+  // Fetch appointments and integration status
+  const { data: appointments = [], isLoading: isLoadingAppointments, error: appointmentsError, refetch: refetchAppointments } = useAppointments();
+  const { data: integrations = [], isLoading: isLoadingIntegrations } = useIntegrationStatus();
+  const { mutate: syncAppointments, isLoading: isSyncing } = useSyncAppointments();
+  const { mutate: updateAppointment } = useUpdateAppointment();
+  const { mutate: cancelAppointment } = useCancelAppointment();
+  const { data: appointmentSources = {} } = useAppointmentSources();
 
-  const [appointments, setAppointments] = useState<Appointment[]>(mockAppointments);
+  // Get last synced time from integrations (use the most recent one)
+  const lastSynced = useMemo(() => {
+    if (!integrations || integrations.length === 0) {
+      return new Date();
+    }
+    const syncedDates = integrations
+      .filter((int) => int.lastSynced)
+      .map((int) => new Date(int.lastSynced!))
+      .sort((a, b) => b.getTime() - a.getTime());
+    return syncedDates.length > 0 ? syncedDates[0] : new Date();
+  }, [integrations]);
 
-  // Map appointments to their source calendar (mock data - in production this would come from API)
-  const appointmentSources = useMemo<Record<string, IntegrationType>>(() => {
-    const sources: Record<string, IntegrationType> = {};
-    appointments.forEach((apt, index) => {
-      // Alternate between outlook and google for demo
-      sources[apt.id] = index % 2 === 0 ? "outlook" : "google";
-    });
-    return sources;
-  }, [appointments]);
+  // Get primary integration (outlook or google) for the health card
+  const primaryIntegration = useMemo<IntegrationType>(() => {
+    if (!integrations || integrations.length === 0) {
+      return "outlook";
+    }
+    // Prefer outlook if available, otherwise google
+    const outlook = integrations.find((int) => int.type === "outlook");
+    return outlook ? "outlook" : "google";
+  }, [integrations]);
+
+  const primaryIntegrationStatus = useMemo(() => {
+    if (!integrations || integrations.length === 0) {
+      return { isConnected: false, lastSynced: null };
+    }
+    const integration = integrations.find((int) => int.type === primaryIntegration);
+    return {
+      isConnected: integration?.isConnected ?? false,
+      lastSynced: integration?.lastSynced ? new Date(integration.lastSynced) : null,
+    };
+  }, [integrations, primaryIntegration]);
 
   /**
    * Handle refresh/sync
    */
   const handleRefresh = useCallback(async () => {
-    setIsSyncing(true);
-    
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    // Update last synced time
-    setLastSynced(new Date());
-    
-    // In real implementation, this would fetch new appointments
-    // For now, we'll just update the last synced time
-    console.log("Syncing appointments...");
-    
-    setIsSyncing(false);
-  }, []);
+    try {
+      await syncAppointments();
+      // Refetch appointments after sync
+      await refetchAppointments();
+    } catch (error) {
+      console.error("Failed to sync appointments:", error);
+    }
+  }, [syncAppointments, refetchAppointments]);
 
   /**
    * Handle edit appointment
    */
   const handleEdit = useCallback((appointmentId: string) => {
     console.log("Edit appointment:", appointmentId);
-    // In real implementation, this would open an edit modal or navigate to edit page
+    // TODO: Open edit modal or navigate to edit page
+    // For now, this is a placeholder
   }, []);
 
   /**
    * Handle cancel appointment
    */
-  const handleCancel = useCallback((appointmentId: string) => {
-    console.log("Cancel appointment:", appointmentId);
-    // In real implementation, this would show a confirmation dialog and cancel the appointment
-    setAppointments((prev) =>
-      prev.map((apt) =>
-        apt.id === appointmentId ? { ...apt, status: "cancelled" as const } : apt
-      )
-    );
+  const handleCancel = useCallback(async (appointmentId: string) => {
+    try {
+      await cancelAppointment({ appointmentId });
+      // Refetch appointments after cancellation
+      await refetchAppointments();
+    } catch (error) {
+      console.error("Failed to cancel appointment:", error);
+    }
+  }, [cancelAppointment, refetchAppointments]);
+
+  /**
+   * Handle connect Outlook calendar
+   */
+  const handleConnectOutlook = useCallback(async () => {
+    try {
+      const redirectUri = `${window.location.origin}/auth/outlook/callback`;
+      console.log("Initiating Outlook OAuth with redirectUri:", redirectUri);
+      
+      const authUrl = await initiateOutlookOAuth(redirectUri);
+      console.log("Received authUrl:", authUrl);
+      
+      if (!authUrl || typeof authUrl !== "string") {
+        console.error("Invalid authUrl received:", authUrl);
+        alert("Failed to get authorization URL. Please check the console for details.");
+        return;
+      }
+      
+      if (!authUrl.startsWith("http")) {
+        console.error("Invalid authUrl format:", authUrl);
+        alert("Invalid authorization URL format. Please check the console for details.");
+        return;
+      }
+      
+      // Redirect user to Microsoft OAuth page
+      console.log("Redirecting to:", authUrl);
+      window.location.href = authUrl;
+    } catch (error) {
+      console.error("Failed to initiate Outlook OAuth:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      alert(`Failed to connect Outlook calendar: ${errorMessage}`);
+    }
+  }, []);
+
+  /**
+   * Handle connect Google calendar (placeholder for future implementation)
+   */
+  const handleConnectGoogle = useCallback(async () => {
+    // TODO: Implement Google Calendar OAuth flow
+    console.log("Google Calendar connection not yet implemented");
   }, []);
 
   return (
@@ -150,11 +167,18 @@ export default function AppointmentsPage() {
 
       {/* Integration Health Card */}
       <IntegrationHealthCard
-        integration="outlook"
-        lastSynced={lastSynced}
+        integration={primaryIntegration}
+        lastSynced={primaryIntegrationStatus.lastSynced || lastSynced}
         onRefresh={handleRefresh}
+        onConnect={
+          primaryIntegration === "outlook"
+            ? handleConnectOutlook
+            : primaryIntegration === "google"
+            ? handleConnectGoogle
+            : undefined
+        }
         isSyncing={isSyncing}
-        isConnected={true}
+        isConnected={primaryIntegrationStatus.isConnected}
       />
 
       {/* Two Column Layout: Calendar and List */}
@@ -163,7 +187,7 @@ export default function AppointmentsPage() {
         {/* Calendar (Full width on mobile/tablet, 1 column on desktop) */}
         <div className="lg:col-span-1">
           <AppointmentCalendar
-            appointments={appointments}
+            appointments={appointments || []}
             appointmentSources={appointmentSources}
             onDateSelect={setSelectedDate}
             selectedDate={selectedDate}
@@ -176,8 +200,7 @@ export default function AppointmentsPage() {
             <ErrorState
               error={appointmentsError}
               onRetry={() => {
-                setAppointmentsError(null);
-                // In real implementation, this would call refetch()
+                refetchAppointments();
               }}
               title="Failed to load appointments"
               inline
@@ -186,7 +209,7 @@ export default function AppointmentsPage() {
             <AppointmentListSkeleton count={5} />
           ) : (selectedDate
             ? appointments.filter((apt) => {
-                const aptDate = new Date(apt.dateTime);
+                const aptDate = typeof apt.dateTime === 'string' ? new Date(apt.dateTime) : apt.dateTime;
                 return (
                   aptDate.getDate() === selectedDate.getDate() &&
                   aptDate.getMonth() === selectedDate.getMonth() &&
@@ -214,7 +237,7 @@ export default function AppointmentsPage() {
               appointments={
                 selectedDate
                   ? appointments.filter((apt) => {
-                      const aptDate = new Date(apt.dateTime);
+                      const aptDate = typeof apt.dateTime === 'string' ? new Date(apt.dateTime) : apt.dateTime;
                       return (
                         aptDate.getDate() === selectedDate.getDate() &&
                         aptDate.getMonth() === selectedDate.getMonth() &&
@@ -229,6 +252,19 @@ export default function AppointmentsPage() {
           )}
         </div>
       </div>
+
+      {/* Weekly Calendar View */}
+      <WeeklyCalendarView
+        appointments={appointments || []}
+        appointmentSources={appointmentSources}
+        onAppointmentClick={(apt) => {
+          // Set selected date to the appointment's date
+          const aptDate = typeof apt.dateTime === 'string' ? new Date(apt.dateTime) : apt.dateTime;
+          setSelectedDate(aptDate);
+          // Scroll to top to see the appointment in the list
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
     </div>
   );
 }
