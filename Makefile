@@ -4,7 +4,38 @@ ifneq (,$(wildcard .env.local))
     export
 endif
 
-.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-no-cache install test format lint terraform-init terraform-plan terraform-apply terraform-destroy frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check proto-compile
+# Voice Gateway Commands
+voice-gateway-test: ## Run voice-gateway unit tests
+	@echo "Running Voice Gateway tests..."
+	cd apps/voice-gateway && go test ./... -v
+
+voice-gateway-test-cov: ## Run voice-gateway tests with coverage
+	@echo "Running Voice Gateway tests with coverage..."
+	cd apps/voice-gateway && go test ./... -v -coverprofile=coverage.out -covermode=atomic
+	cd apps/voice-gateway && go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: apps/voice-gateway/coverage.html"
+
+voice-gateway-build: ## Build voice-gateway binary
+	@echo "Building Voice Gateway..."
+	cd apps/voice-gateway && go build -o bin/voice-gateway ./cmd/server
+
+voice-gateway-run: voice-gateway-build ## Run voice-gateway service
+	@echo "Running Voice Gateway..."
+	cd apps/voice-gateway && ./bin/voice-gateway
+
+voice-gateway-lint: ## Lint voice-gateway code
+	@echo "Linting Voice Gateway code..."
+	cd apps/voice-gateway && golangci-lint run || echo "⚠️  golangci-lint not installed, skipping"
+
+voice-gateway-fmt: ## Format voice-gateway code
+	@echo "Formatting Voice Gateway code..."
+	cd apps/voice-gateway && go fmt ./...
+
+voice-gateway-vendor: ## Vendor voice-gateway dependencies
+	@echo "Vendoring Voice Gateway dependencies..."
+	cd apps/voice-gateway && go mod vendor
+
+.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-voice-gateway docker-build-no-cache install test format lint terraform-init terraform-plan terraform-apply terraform-destroy frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check voice-deps voice-build voice-run voice-test voice-test-cov voice-fmt voice-vet voice-lint voice-check voice-clean voice-health proto-compile proto-compile-go proto-clean-go
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -68,6 +99,12 @@ docker-build-document-ingestion: ## Build document-ingestion Docker image
 docker-build-document-ingestion-no-cache: ## Build document-ingestion Docker image without using cache
 	$(DOCKER_COMPOSE) build --no-cache document-ingestion
 
+docker-build-voice-gateway: ## Build voice-gateway Docker image
+	$(DOCKER_COMPOSE) build voice-gateway
+
+docker-build-voice-gateway-no-cache: ## Build voice-gateway Docker image without using cache
+	$(DOCKER_COMPOSE) build --no-cache voice-gateway
+
 docker-rebuild: ## Rebuild and restart all services
 	$(DOCKER_COMPOSE) up -d --build
 
@@ -79,6 +116,9 @@ docker-rebuild-cognitive-orch: ## Rebuild and restart cognitive-orch service
 
 docker-rebuild-document-ingestion: ## Rebuild and restart document-ingestion service
 	$(DOCKER_COMPOSE) up -d --build document-ingestion
+
+docker-rebuild-voice-gateway: ## Rebuild and restart voice-gateway service
+	$(DOCKER_COMPOSE) up -d --build voice-gateway
 
 # Installation
 install: ## Install dependencies for all services
@@ -510,11 +550,98 @@ ingestion-ready: ## Check document-ingestion service readiness
 	@echo "Checking Document Ingestion Service readiness..."
 	@curl -s http://localhost:8003/ready | python3 -m json.tool || echo "Service not running or not accessible"
 
+# Voice Gateway Service commands (Go)
+voice-deps: ## Download and tidy Go dependencies for voice-gateway
+	@echo "Downloading Go dependencies for Voice Gateway..."
+	cd apps/voice-gateway && go mod download
+	cd apps/voice-gateway && go mod tidy
+	@echo "✓ Dependencies downloaded and tidied"
+
+voice-build: ## Build voice-gateway binary
+	@echo "Building Voice Gateway binary..."
+	cd apps/voice-gateway && go build -o bin/voice-gateway ./cmd/server
+	@echo "✓ Binary built at apps/voice-gateway/bin/voice-gateway"
+
+voice-build-linux: ## Build voice-gateway binary for Linux (for Docker)
+	@echo "Building Voice Gateway binary for Linux..."
+	cd apps/voice-gateway && GOOS=linux GOARCH=amd64 go build -o bin/voice-gateway-linux ./cmd/server
+	@echo "✓ Linux binary built at apps/voice-gateway/bin/voice-gateway-linux"
+
+voice-run: ## Run voice-gateway development server
+	@echo "Starting Voice Gateway development server..."
+	@echo "Server will be available at http://localhost:8080"
+	@echo "Twilio WebSocket endpoint: ws://localhost:8080/streams/twilio"
+	@echo "Health check: http://localhost:8080/health"
+	cd apps/voice-gateway && go run ./cmd/server
+
+voice-test: ## Run voice-gateway tests
+	@echo "Running Voice Gateway tests..."
+	cd apps/voice-gateway && go test ./... -v
+
+voice-test-cov: ## Run voice-gateway tests with coverage
+	@echo "Running Voice Gateway tests with coverage..."
+	cd apps/voice-gateway && go test ./... -coverprofile=coverage.out -covermode=atomic
+	cd apps/voice-gateway && go tool cover -html=coverage.out -o coverage.html
+	@echo "✓ Coverage report generated at apps/voice-gateway/coverage.html"
+
+voice-fmt: ## Format voice-gateway code with gofmt
+	@echo "Formatting Voice Gateway code..."
+	cd apps/voice-gateway && go fmt ./...
+	@echo "✓ Code formatted"
+
+voice-vet: ## Run go vet on voice-gateway code
+	@echo "Running go vet on Voice Gateway code..."
+	cd apps/voice-gateway && go vet ./...
+	@echo "✓ go vet completed"
+
+voice-lint: ## Lint voice-gateway code with golangci-lint (if available)
+	@echo "Linting Voice Gateway code..."
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		cd apps/voice-gateway && golangci-lint run ./...; \
+		echo "✓ golangci-lint completed"; \
+	else \
+		echo "⚠️  golangci-lint not found. Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
+		echo "Running go vet instead..."; \
+		$(MAKE) voice-vet; \
+	fi
+
+voice-check: ## Run all code quality checks (fmt, vet, lint)
+	@echo "Running all code quality checks for Voice Gateway..."
+	$(MAKE) voice-fmt
+	$(MAKE) voice-vet
+	$(MAKE) voice-lint
+
+voice-clean: ## Clean voice-gateway build artifacts
+	@echo "Cleaning Voice Gateway build artifacts..."
+	cd apps/voice-gateway && rm -rf bin/ coverage.out coverage.html
+	@echo "✓ Build artifacts cleaned"
+
+voice-health: ## Check voice-gateway service health
+	@echo "Checking Voice Gateway service health..."
+	@curl -s http://localhost:8080/health | python3 -m json.tool || echo "Service not running or not accessible"
+
 # Protocol Buffer compilation
 proto-compile: ## Compile Protocol Buffer definitions to Python stubs (compatible with protobuf 5.x)
 	@echo "Compiling Protocol Buffers with protobuf 5.x compatibility..."
-	@chmod +x scripts/compile_protos_compatible.sh
-	@scripts/compile_protos_compatible.sh
+	@chmod +x tools/scripts/compile_protos_compatible.sh
+	@tools/scripts/compile_protos_compatible.sh
+
+proto-compile-go: ## Compile Protocol Buffer definitions to Go stubs for voice-gateway
+	@echo "Compiling Protocol Buffers for Go..."
+	@mkdir -p apps/voice-gateway/internal/orchestrator/proto
+	@PATH=$$PATH:$$HOME/go/bin:$$GOPATH/bin protoc \
+		--proto_path=libs/proto \
+		--go_out=apps/voice-gateway/internal/orchestrator/proto \
+		--go_opt=paths=source_relative \
+		--go-grpc_out=apps/voice-gateway/internal/orchestrator/proto \
+		--go-grpc_opt=paths=source_relative \
+		libs/proto/cognitive_orch.proto
+	@echo "✓ Proto files compiled successfully"
+
+proto-clean-go: ## Clean generated Go proto files
+	@echo "Cleaning generated Go proto files..."
+	@rm -rf apps/voice-gateway/internal/orchestrator/proto
+	@echo "✓ Go proto files cleaned"
 
 # Development utilities
 clean: ## Clean build artifacts and temporary files

@@ -81,6 +81,20 @@ async def get_current_user_profile(
                     detail="User profile not found",
                 )
 
+            # If user doesn't have a firm_id, create one for them
+            if not db_user.firm_id:
+                from api_core.repositories.firms_repository import FirmsRepository
+                firms_repo = FirmsRepository(session)
+                
+                # Create a firm for the user
+                firm = await firms_repo.create(
+                    name=f"{db_user.name}'s Firm",  # Default firm name
+                )
+                db_user.firm_id = firm.id
+                await session.flush()
+                await session.refresh(db_user)
+                logger.info(f"Created firm {firm.id} for existing user {db_user.id}")
+
             return user_service._user_to_response(db_user)
     except HTTPException:
         raise

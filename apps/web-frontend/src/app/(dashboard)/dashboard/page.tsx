@@ -8,6 +8,7 @@ import { KPICardSkeleton } from "@/components/dashboard/KPICardSkeleton";
 import { ChartSkeleton } from "@/components/dashboard/ChartSkeleton";
 import { ActivityList, type ActivityListItem } from "@/components/dashboard/ActivityList";
 import { StatusIndicator } from "@/components/dashboard/StatusIndicator";
+import { PhoneNumberWidget } from "@/components/dashboard/PhoneNumberWidget";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ErrorState } from "@/components/ui/ErrorState";
@@ -110,6 +111,13 @@ export default function DashboardPage() {
           )}
         </div>
       )}
+
+      {/* Phone Number Widget - Quick Status */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="lg:col-span-1">
+          <PhoneNumberWidget />
+        </div>
+      </div>
 
       {/* Middle Row - Volume Chart + Activity List */}
       {/* Mobile: Stack vertically, Tablet: Stack vertically, Desktop: Side by side (8/4 split) */}

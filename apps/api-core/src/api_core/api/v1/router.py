@@ -42,6 +42,7 @@ from api_core.api.v1 import (
     knowledge,
     leads,
     notifications,
+    twilio,
     users,
 )
 
@@ -71,6 +72,7 @@ router.include_router(notifications.router)
 router.include_router(firms.router)
 router.include_router(conversations.router)
 router.include_router(calls.router)
+router.include_router(twilio.router)
 
 
 @router.get(
@@ -106,5 +108,6 @@ async def api_info():
             "firms": "/api/v1/firms",
             "conversations": "/api/v1/conversations",
             "calls": "/api/v1/calls",
+            "twilio": "/api/v1/twilio",
         },
     }

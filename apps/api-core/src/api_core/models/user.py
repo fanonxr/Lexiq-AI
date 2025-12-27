@@ -24,6 +24,7 @@ class UserResponse(BaseModel):
     name: str = Field(..., description="User full name")
     given_name: Optional[str] = Field(None, description="User given name")
     family_name: Optional[str] = Field(None, description="User family name")
+    firm_id: Optional[str] = Field(None, description="Firm ID that the user belongs to")
     is_active: bool = Field(..., description="Whether the user account is active")
     is_verified: bool = Field(..., description="Whether the email is verified")
     created_at: Optional[str] = Field(None, description="Account creation timestamp")

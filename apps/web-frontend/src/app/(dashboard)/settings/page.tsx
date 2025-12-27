@@ -9,6 +9,7 @@ import { Trash2, Save, Key, User, AlertTriangle } from "lucide-react";
 import { fetchUserProfile, updateUserProfile, terminateAccount } from "@/lib/api/users";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
+import { FirmPhoneNumberSettings } from "@/components/settings/FirmPhoneNumberSettings";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
@@ -244,6 +245,9 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Firm Phone Number */}
+      <FirmPhoneNumberSettings />
 
       {/* Security Settings */}
       <Card>
