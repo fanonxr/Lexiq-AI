@@ -108,9 +108,6 @@ services:
       - ./apps/api-core/src:/app/src:ro  # Read-only for production-like behavior
     # Load environment variables from apps/api-core/.env
     # Each app in the monorepo has its own .env file
-    env_file:
-      - ./apps/api-core/.env
-      - ./.env.local
     environment:
       - APP_NAME=api-core
       - APP_ENV=development
@@ -134,12 +131,21 @@ services:
       # Azure AD B2C / Entra ID Configuration (required for token validation)
       # For Entra ID: Set TENANT_ID, CLIENT_ID, and INSTANCE (no policy needed)
       # For Azure AD B2C: Also set POLICY_SIGNUP_SIGNIN
-      - AZURE_AD_B2C_TENANT_ID=${AZURE_AD_B2C_TENANT_ID:-4c1d2fdb-42e5-4b3e-ad64-edf6798d79b7}
-      - AZURE_AD_B2C_CLIENT_ID=${AZURE_AD_B2C_CLIENT_ID:-1fabcd74-ddc8-45ae-a7ed-fe017ae6b5ce}
-      - AZURE_AD_B2C_CLIENT_SECRET=${AZURE_AD_B2C_CLIENT_SECRET:-GlZ8Q~tCzR5yI1WKNEhWX12c~QkQZE2C3aMRXcf6}
-      - AZURE_AD_B2C_POLICY_SIGNUP_SIGNIN=${AZURE_AD_B2C_POLICY_SIGNUP_SIGNIN:-}
+      - AZURE_AD_B2C_TENANT_ID=${AZURE_AD_B2C_TENANT_ID:-}
+      - AZURE_AD_B2C_CLIENT_ID=${AZURE_AD_B2C_CLIENT_ID:-}
+      - AZURE_AD_B2C_CLIENT_SECRET=${AZURE_AD_B2C_CLIENT_SECRET:-}
       - AZURE_AD_B2C_INSTANCE=${AZURE_AD_B2C_INSTANCE:-https://login.microsoftonline.com}
       - AZURE_AD_B2C_USE_B2C=${AZURE_AD_B2C_USE_B2C:-false}
+      # Twilio Configuration
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      # API Base URL for webhooks (used when provisioning phone numbers)
+      # - API_BASE_URL=${API_BASE_URL:-http://localhost:8000}
+      - API_BASE_URL=${API_BASE_URL:-https://ungenerically-subcontiguous-vernetta.ngrok-free.dev}
+      # Voice Gateway URL (used in TwiML responses)
+      - VOICE_GATEWAY_URL=${VOICE_GATEWAY_URL:-wss://localhost:8080/streams/twilio}
+      # Twilio Webhook Security
+      - TWILIO_VALIDATE_SIGNATURES=${TWILIO_VALIDATE_SIGNATURES:-true}
       - PYTHONPATH=/app/src
     command: uvicorn api_core.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
@@ -305,6 +311,61 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 40s
+      retries: 3
+    networks:
+      - lexiqai-network
+
+  # Voice Gateway Service (Go)
+  # Handles Twilio WebSocket connections, STT, TTS, and Orchestrator integration
+  voice-gateway:
+    build:
+      context: .
+      dockerfile: docker/voice-gateway/Dockerfile
+    container_name: lexiqai-voice-gateway-local
+    ports:
+      - "8080:8080"
+    depends_on:
+      cognitive-orch:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+      # Mount source for development (optional - comment out for production)
+      - ./apps/voice-gateway:/app/src:ro
+    environment:
+      # Server Configuration
+      - PORT=8080
+      # Deepgram STT Configuration
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
+      - DEEPGRAM_MODEL=${DEEPGRAM_MODEL:-nova-2}
+      - DEEPGRAM_LANGUAGE=${DEEPGRAM_LANGUAGE:-en}
+      # Cartesia TTS Configuration
+      - CARTESIA_API_KEY=${CARTESIA_API_KEY:-}
+      - CARTESIA_VOICE_ID=${CARTESIA_VOICE_ID:-sonic-english}
+      - CARTESIA_MODEL_ID=${CARTESIA_MODEL_ID:-sonic}
+      # Orchestrator gRPC Configuration
+      - ORCHESTRATOR_URL=cognitive-orch:50051
+      - ORCHESTRATOR_TLS_ENABLED=false
+      - ORCHESTRATOR_TIMEOUT=30
+      # Audio Processing Configuration
+      - AUDIO_BUFFER_SIZE=${AUDIO_BUFFER_SIZE:-8192}
+      - VAD_ENERGY_THRESHOLD=${VAD_ENERGY_THRESHOLD:-500.0}
+      - VAD_SILENCE_FRAMES=${VAD_SILENCE_FRAMES:-10}
+      # Resilience Configuration
+      - CIRCUIT_BREAKER_MAX_FAILURES=${CIRCUIT_BREAKER_MAX_FAILURES:-5}
+      - CIRCUIT_BREAKER_RESET_TIMEOUT=${CIRCUIT_BREAKER_RESET_TIMEOUT:-30}
+      - RETRY_MAX_ATTEMPTS=${RETRY_MAX_ATTEMPTS:-3}
+      - RETRY_INITIAL_BACKOFF=${RETRY_INITIAL_BACKOFF:-100}
+      - RECONNECT_MAX_ATTEMPTS=${RECONNECT_MAX_ATTEMPTS:-5}
+      - RECONNECT_BACKOFF=${RECONNECT_BACKOFF:-1000}
+      # Observability Configuration
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_PRETTY=${LOG_PRETTY:-false}
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
       retries: 3
     networks:
       - lexiqai-network

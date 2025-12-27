@@ -616,6 +616,17 @@ class Firm(Base):
         String(100), nullable=True, unique=True, index=True
     )
 
+    # Twilio Integration
+    twilio_phone_number: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, unique=True, index=True
+    )  # E.164 format: +15551234567
+    twilio_phone_number_sid: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, unique=True, index=True
+    )  # Twilio Phone Number SID (e.g., PNxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)
+    twilio_subaccount_sid: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, unique=True, index=True
+    )  # Twilio Subaccount SID (e.g., ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx) - for billing/organization
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False
@@ -634,7 +645,8 @@ class Firm(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Firm(id={self.id}, name={self.name})>"
+        phone_info = f", phone={self.twilio_phone_number}" if self.twilio_phone_number else ""
+        return f"<Firm(id={self.id}, name={self.name}{phone_info})>"
 
 
 class AgentConfig(Base):

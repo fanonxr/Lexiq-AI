@@ -30,6 +30,7 @@ azure-storage-blob = "^12.19.0"  # Azure Blob Storage SDK for file uploads
 aiohttp = "^3.9.1"  # Required for async Azure Blob Storage client
 python-multipart = "^0.0.6"  # Required for FastAPI file uploads
 aio-pika = "^9.2.1"  # RabbitMQ publishing (document ingestion jobs)
+twilio = "^8.0.0"  # Twilio API for phone number management
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"

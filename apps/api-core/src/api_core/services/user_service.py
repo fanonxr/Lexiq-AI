@@ -64,6 +64,7 @@ class UserService:
             name=user.name,
             given_name=user.given_name,
             family_name=user.family_name,
+            firm_id=user.firm_id,
             is_active=user.is_active,
             is_verified=user.is_verified,
             created_at=user.created_at.isoformat() if user.created_at else None,
@@ -130,6 +131,20 @@ class UserService:
 
         # Create user
         try:
+            # If firm_id is not provided, create a firm for the user
+            firm_id = kwargs.get("firm_id")
+            if not firm_id:
+                from api_core.repositories.firms_repository import FirmsRepository
+                firms_repo = FirmsRepository(self.session)
+                
+                # Create a firm for the user (using user's name as firm name)
+                firm = await firms_repo.create(
+                    name=f"{name}'s Firm",  # Default firm name
+                )
+                firm_id = firm.id
+                logger.info(f"Created firm {firm_id} for new user {email}")
+            
+            # Create user with firm_id
             user = await self.repository.create_user(
                 email=email,
                 name=name,
@@ -137,9 +152,10 @@ class UserService:
                 azure_ad_object_id=azure_ad_object_id,
                 azure_ad_tenant_id=azure_ad_tenant_id,
                 is_verified=is_verified,
-                **kwargs,
+                firm_id=firm_id,  # Always set firm_id
+                **{k: v for k, v in kwargs.items() if k != "firm_id"},  # Exclude firm_id from kwargs
             )
-            logger.info(f"Created user: {user.id} ({user.email})")
+            logger.info(f"Created user: {user.id} ({user.email}) with firm_id: {firm_id}")
             return self._user_to_profile(user)
         except Exception as e:
             logger.error(f"Error creating user: {e}")
@@ -413,15 +429,29 @@ class UserService:
                 return self._user_to_profile(user)
             else:
                 # Create new user from Azure AD
+                # Create a firm for the user if they don't have one
+                firm_id = kwargs.get("firm_id")
+                if not firm_id:
+                    from api_core.repositories.firms_repository import FirmsRepository
+                    firms_repo = FirmsRepository(self.session)
+                    
+                    # Create a firm for the user
+                    firm = await firms_repo.create(
+                        name=f"{name}'s Firm",  # Default firm name
+                    )
+                    firm_id = firm.id
+                    logger.info(f"Created firm {firm_id} for new Azure AD user {email}")
+                
                 user = await self.repository.create_user(
                     email=email,
                     name=name,
                     azure_ad_object_id=azure_ad_object_id,
                     azure_ad_tenant_id=azure_ad_tenant_id,
                     is_verified=True,  # Azure AD users are pre-verified
-                    **kwargs,
+                    firm_id=firm_id,  # Set firm_id
+                    **{k: v for k, v in kwargs.items() if k != "firm_id"},  # Exclude firm_id from kwargs
                 )
-                logger.info(f"Created new user from Azure AD: {user.id}")
+                logger.info(f"Created new user from Azure AD: {user.id} with firm_id: {firm_id}")
                 return self._user_to_profile(user)
 
     async def update_last_login(self, user_id: str) -> None:
