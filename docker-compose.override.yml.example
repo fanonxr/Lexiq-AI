@@ -27,3 +27,29 @@ services:
       QDRANT__SERVICE__GRPC_PORT: 6334
       # QDRANT__LOG_LEVEL: DEBUG  # Enable debug logging
 
+  api-core:
+    # Azure Blob Storage Configuration
+    # Replace with your actual Azure Storage Account credentials
+    environment:
+      STORAGE_ACCOUNT_NAME: "yourstorageaccountname"
+      # Option 1: Use connection string (recommended)
+      STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=https;AccountName=yourstorageaccountname;AccountKey=yourkey==;EndpointSuffix=core.windows.net"
+      # Option 2: Use account key (alternative)
+      # STORAGE_ACCOUNT_KEY: "your_account_key_here"
+      # STORAGE_USE_MANAGED_IDENTITY: "false"
+      # Option 3: Use Managed Identity (for Azure-hosted services)
+      # STORAGE_USE_MANAGED_IDENTITY: "true"
+
+  document-ingestion:
+    # Azure Blob Storage Configuration
+    # Replace with your actual Azure Storage Account credentials
+    environment:
+      STORAGE_ACCOUNT_NAME: "yourstorageaccountname"
+      # Option 1: Use connection string (recommended)
+      STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=https;AccountName=yourstorageaccountname;AccountKey=yourkey==;EndpointSuffix=core.windows.net"
+      # Option 2: Use account key (alternative)
+      # STORAGE_ACCOUNT_KEY: "your_account_key_here"
+      # STORAGE_USE_MANAGED_IDENTITY: "false"
+      # Option 3: Use Managed Identity (for Azure-hosted services)
+      # STORAGE_USE_MANAGED_IDENTITY: "true"
+

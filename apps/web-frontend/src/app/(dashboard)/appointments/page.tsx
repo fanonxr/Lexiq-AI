@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, Suspense } from "react";
 import { IntegrationHealthCard, type IntegrationType } from "@/components/appointments/IntegrationHealthCard";
 import { AppointmentList, type Appointment } from "@/components/appointments/AppointmentList";
 import { AppointmentListSkeleton } from "@/components/appointments/AppointmentListSkeleton";
@@ -19,9 +19,11 @@ import {
   useAppointmentSources,
 } from "@/hooks/useAppointments";
 import { initiateOutlookOAuth } from "@/lib/api/calendar-integrations";
+import { logger } from "@/lib/logger";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 /**
  * Appointments Page
@@ -33,7 +35,7 @@ export const dynamic = "force-dynamic";
  * - Integration Health Card (top)
  * - Appointment List (below)
  */
-export default function AppointmentsPage() {
+function AppointmentsPageContent() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
 
   // Fetch appointments and integration status
@@ -42,7 +44,7 @@ export default function AppointmentsPage() {
   const { mutate: syncAppointments, isLoading: isSyncing } = useSyncAppointments();
   const { mutate: updateAppointment } = useUpdateAppointment();
   const { mutate: cancelAppointment } = useCancelAppointment();
-  const { data: appointmentSources = {} } = useAppointmentSources();
+  const { data: appointmentSources } = useAppointmentSources();
 
   // Get last synced time from integrations (use the most recent one)
   const lastSynced = useMemo(() => {
@@ -86,7 +88,7 @@ export default function AppointmentsPage() {
       // Refetch appointments after sync
       await refetchAppointments();
     } catch (error) {
-      console.error("Failed to sync appointments:", error);
+      logger.error("Failed to sync appointments", error instanceof Error ? error : new Error(String(error)));
     }
   }, [syncAppointments, refetchAppointments]);
 
@@ -94,7 +96,7 @@ export default function AppointmentsPage() {
    * Handle edit appointment
    */
   const handleEdit = useCallback((appointmentId: string) => {
-    console.log("Edit appointment:", appointmentId);
+    logger.debug("Edit appointment", { appointmentId });
     // TODO: Open edit modal or navigate to edit page
     // For now, this is a placeholder
   }, []);
@@ -108,7 +110,7 @@ export default function AppointmentsPage() {
       // Refetch appointments after cancellation
       await refetchAppointments();
     } catch (error) {
-      console.error("Failed to cancel appointment:", error);
+      logger.error("Failed to cancel appointment", error instanceof Error ? error : new Error(String(error)), { appointmentId });
     }
   }, [cancelAppointment, refetchAppointments]);
 
@@ -118,28 +120,28 @@ export default function AppointmentsPage() {
   const handleConnectOutlook = useCallback(async () => {
     try {
       const redirectUri = `${window.location.origin}/auth/outlook/callback`;
-      console.log("Initiating Outlook OAuth with redirectUri:", redirectUri);
+      logger.debug("Initiating Outlook OAuth", { redirectUri });
       
       const authUrl = await initiateOutlookOAuth(redirectUri);
-      console.log("Received authUrl:", authUrl);
+      logger.debug("Received authUrl", { hasAuthUrl: !!authUrl });
       
       if (!authUrl || typeof authUrl !== "string") {
-        console.error("Invalid authUrl received:", authUrl);
+        logger.error("Invalid authUrl received", undefined, { authUrl });
         alert("Failed to get authorization URL. Please check the console for details.");
         return;
       }
       
       if (!authUrl.startsWith("http")) {
-        console.error("Invalid authUrl format:", authUrl);
+        logger.error("Invalid authUrl format", undefined, { authUrl });
         alert("Invalid authorization URL format. Please check the console for details.");
         return;
       }
       
       // Redirect user to Microsoft OAuth page
-      console.log("Redirecting to:", authUrl);
+      logger.info("Redirecting to Outlook OAuth", { authUrl: authUrl.substring(0, 50) + "..." });
       window.location.href = authUrl;
     } catch (error) {
-      console.error("Failed to initiate Outlook OAuth:", error);
+      logger.error("Failed to initiate Outlook OAuth", error instanceof Error ? error : new Error(String(error)));
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       alert(`Failed to connect Outlook calendar: ${errorMessage}`);
     }
@@ -150,7 +152,7 @@ export default function AppointmentsPage() {
    */
   const handleConnectGoogle = useCallback(async () => {
     // TODO: Implement Google Calendar OAuth flow
-    console.log("Google Calendar connection not yet implemented");
+    logger.info("Google Calendar connection not yet implemented");
   }, []);
 
   return (
@@ -188,7 +190,7 @@ export default function AppointmentsPage() {
         <div className="lg:col-span-1">
           <AppointmentCalendar
             appointments={appointments || []}
-            appointmentSources={appointmentSources}
+            appointmentSources={appointmentSources ?? undefined}
             onDateSelect={setSelectedDate}
             selectedDate={selectedDate}
           />
@@ -207,17 +209,20 @@ export default function AppointmentsPage() {
             />
           ) : isLoadingAppointments ? (
             <AppointmentListSkeleton count={5} />
-          ) : (selectedDate
-            ? appointments.filter((apt) => {
-                const aptDate = typeof apt.dateTime === 'string' ? new Date(apt.dateTime) : apt.dateTime;
-                return (
-                  aptDate.getDate() === selectedDate.getDate() &&
-                  aptDate.getMonth() === selectedDate.getMonth() &&
-                  aptDate.getFullYear() === selectedDate.getFullYear()
-                );
-              })
-            : appointments
-          ).length === 0 ? (
+          ) : (() => {
+              const appointmentsList = appointments || [];
+              const filteredAppointments = selectedDate
+                ? appointmentsList.filter((apt) => {
+                    const aptDate = typeof apt.dateTime === 'string' ? new Date(apt.dateTime) : apt.dateTime;
+                    return (
+                      aptDate.getDate() === selectedDate.getDate() &&
+                      aptDate.getMonth() === selectedDate.getMonth() &&
+                      aptDate.getFullYear() === selectedDate.getFullYear()
+                    );
+                  })
+                : appointmentsList;
+              return filteredAppointments.length === 0;
+            })() ? (
             <EmptyState
               icon={<Calendar className="h-12 w-12" />}
               title={
@@ -235,16 +240,18 @@ export default function AppointmentsPage() {
           ) : (
             <AppointmentList
               appointments={
-                selectedDate
-                  ? appointments.filter((apt) => {
-                      const aptDate = typeof apt.dateTime === 'string' ? new Date(apt.dateTime) : apt.dateTime;
-                      return (
-                        aptDate.getDate() === selectedDate.getDate() &&
-                        aptDate.getMonth() === selectedDate.getMonth() &&
-                        aptDate.getFullYear() === selectedDate.getFullYear()
-                      );
-                    })
-                  : appointments
+                (() => {
+                  const appointmentsList = appointments || [];
+                  if (!selectedDate) return appointmentsList;
+                  return appointmentsList.filter((apt) => {
+                    const aptDate = typeof apt.dateTime === 'string' ? new Date(apt.dateTime) : apt.dateTime;
+                    return (
+                      aptDate.getDate() === selectedDate.getDate() &&
+                      aptDate.getMonth() === selectedDate.getMonth() &&
+                      aptDate.getFullYear() === selectedDate.getFullYear()
+                    );
+                  });
+                })()
               }
               onEdit={handleEdit}
               onCancel={handleCancel}
@@ -256,7 +263,7 @@ export default function AppointmentsPage() {
       {/* Weekly Calendar View */}
       <WeeklyCalendarView
         appointments={appointments || []}
-        appointmentSources={appointmentSources}
+        appointmentSources={appointmentSources ?? undefined}
         onAppointmentClick={(apt) => {
           // Set selected date to the appointment's date
           const aptDate = typeof apt.dateTime === 'string' ? new Date(apt.dateTime) : apt.dateTime;
@@ -266,6 +273,14 @@ export default function AppointmentsPage() {
         }}
       />
     </div>
+  );
+}
+
+export default function AppointmentsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AppointmentsPageContent />
+    </Suspense>
   );
 }
 

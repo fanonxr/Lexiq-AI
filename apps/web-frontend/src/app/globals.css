@@ -37,17 +37,40 @@
   --spacing-xl: 2rem; /* 32px */
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Dark mode is handled by the .dark class applied by ThemeProvider */
+/* Default to light mode - only apply dark if explicitly set */
+
+/* Ensure no extra space at bottom */
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  background: #ffffff;
+  color-scheme: light;
+}
+
+html.light {
+  background: #ffffff;
+  color-scheme: light;
+}
+
+html.dark {
+  background: #0a0a0a;
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: #ffffff;
+  color: #171717;
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+}
+
+html.dark body {
+  background: #0a0a0a;
+  color: #ededed;
 }
 
 /* ============================================
@@ -149,30 +172,56 @@ body {
 }
 
 /* Shadcn theme variables - LexiqAI Design System */
+/* Light mode (default) - Pure white backgrounds */
 :root {
-  --background: 0 0% 100%;
-  --foreground: 0 0% 3.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 0 0% 3.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 3.9%;
+  --background: 0 0% 100%; /* Pure white for maximum contrast */
+  --foreground: 0 0% 9%; /* Darker text for better readability */
+  --card: 0 0% 100%; /* Pure white cards */
+  --card-foreground: 0 0% 9%; /* Darker text on cards */
+  --popover: 0 0% 100%; /* Pure white popovers */
+  --popover-foreground: 0 0% 9%; /* Darker text in popovers */
   --primary: 0 0% 3.5%; /* #09090b - Primary black */
   --primary-foreground: 0 0% 98%;
-  --secondary: 0 0% 96.1%;
-  --secondary-foreground: 0 0% 9%;
-  --muted: 0 0% 98%; /* #fafafa - Light gray for app shells/sidebars */
-  --muted-foreground: 0 0% 45.1%;
-  --accent: 0 0% 96.1%;
-  --accent-foreground: 0 0% 9%;
+  --secondary: 0 0% 96%; /* Very light gray for secondary elements */
+  --secondary-foreground: 0 0% 9%; /* Darker text on secondary */
+  --muted: 0 0% 96%; /* Very light gray for app shells/sidebars */
+  --muted-foreground: 0 0% 45%; /* Muted text for better contrast */
+  --accent: 0 0% 96%; /* Light accent background */
+  --accent-foreground: 0 0% 9%; /* Darker text on accent */
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 89.4%; /* #e4e4e7 - Subtle gray for borders */
-  --input: 0 0% 89.4%;
-  --ring: 0 0% 3.9%;
+  --border: 0 0% 90%; /* Slightly darker borders for better visibility */
+  --input: 0 0% 100%; /* Pure white inputs */
+  --ring: 0 0% 9%; /* Darker ring for better visibility */
   --radius: 0.375rem; /* 6px - rounded-md */
   --radius-lg: 0.5rem; /* 8px - rounded-lg */
 }
 
+/* Ensure light mode uses white backgrounds */
+html.light,
+:root.light {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+  --primary: 0 0% 3.5%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 9%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 90%;
+  --input: 0 0% 100%;
+  --ring: 0 0% 9%;
+}
+
+/* Dark mode - Dark backgrounds */
 .dark {
   --background: 0 0% 3.9%;
   --foreground: 0 0% 98%;

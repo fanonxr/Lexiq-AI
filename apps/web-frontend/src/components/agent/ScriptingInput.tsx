@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/Label";
 import { Button } from "@/components/ui/button";
 import { Sparkles, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { logger } from "@/lib/logger";
 
 /**
  * Scripting Input Component
@@ -116,7 +117,7 @@ export function ScriptingInput({
       setIsImproving(true);
       await onImproveWithAI();
     } catch (error) {
-      console.error("Failed to improve script:", error);
+      logger.error("Failed to improve script", error instanceof Error ? error : new Error(String(error)));
     } finally {
       setIsImproving(false);
     }

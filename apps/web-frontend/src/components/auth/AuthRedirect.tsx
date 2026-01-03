@@ -22,6 +22,7 @@
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { logger } from "@/lib/logger";
 
 interface AuthRedirectProps {
   children: React.ReactNode;
@@ -43,9 +44,7 @@ export function AuthRedirect({
   useEffect(() => {
     // Wait for auth to finish loading
     if (isLoading) {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[AuthRedirect] Waiting for auth to load...");
-      }
+      logger.debug("Waiting for auth to load...");
       return;
     }
 
@@ -56,16 +55,12 @@ export function AuthRedirect({
       const redirect = searchParams.get("redirect");
       const finalRedirect = redirect || redirectTo;
       
-      if (process.env.NODE_ENV === "development") {
-        console.log("[AuthRedirect] User authenticated, redirecting to:", finalRedirect);
-      }
+      logger.debug("User authenticated, redirecting", { redirectTo: finalRedirect });
       
       // Use replace to avoid redirect loops
       router.replace(finalRedirect);
     } else {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[AuthRedirect] User not authenticated, showing form");
-      }
+      logger.debug("User not authenticated, showing form");
     }
   }, [isAuthenticated, isLoading, router, searchParams, redirectTo]);
 

@@ -5,6 +5,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Cloud, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
+import { logger } from "@/lib/logger";
 
 /**
  * Upload Zone Component
@@ -107,7 +108,7 @@ export function UploadZone({
 
       for (const file of fileArray) {
         if (maxSize && !validateFileSize(file)) {
-          console.warn(`File ${file.name} exceeds maximum size of ${maxSize} bytes`);
+          logger.warn("File exceeds maximum size", { fileName: file.name, maxSize, fileSize: file.size });
           continue;
         }
         validFiles.push(file);

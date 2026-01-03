@@ -23,6 +23,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { logger } from "@/lib/logger";
 import {
   fetchFiles,
   uploadFile,
@@ -91,7 +92,7 @@ export function useFiles(): UseQueryResult<FileMetadata[]> {
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to fetch files");
       setError(error);
-      console.error("Error fetching files:", error);
+      logger.error("Error fetching files", error);
     } finally {
       setIsLoading(false);
     }
@@ -115,7 +116,7 @@ export function useFiles(): UseQueryResult<FileMetadata[]> {
  * 
  * const handleUpload = (file: File) => {
  *   uploadFile(file, (progress) => {
- *     console.log(`Upload progress: ${progress}%`);
+ *     logger.debug(`Upload progress: ${progress}%`);
  *   });
  * };
  * ```
@@ -154,7 +155,7 @@ export function useUploadFile(): UseUploadFileResult {
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to upload file");
         setError(error);
-        console.error("Error uploading file:", error);
+        logger.error("Error uploading file", error, { fileName: file.name });
         throw error;
       } finally {
         setIsLoading(false);
@@ -200,7 +201,7 @@ export function useDeleteFile(): UseMutationResult<boolean, string> {
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to delete file");
       setError(error);
-      console.error("Error deleting file:", error);
+      logger.error("Error deleting file", error, { fileId: data.fileId });
       throw error;
     } finally {
       setIsLoading(false);
@@ -241,7 +242,7 @@ export function useReindexFile(): UseMutationResult<FileMetadata, string> {
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to re-index file");
       setError(error);
-      console.error("Error re-indexing file:", error);
+      logger.error("Error re-indexing file", error, { fileId: data.fileId });
       throw error;
     } finally {
       setIsLoading(false);
@@ -266,8 +267,7 @@ export function useReindexFile(): UseMutationResult<FileMetadata, string> {
  * 
  * const handleQuery = async (query: string) => {
  *   const response = await queryKB(query);
- *   console.log("Answer:", response.answer);
- *   console.log("Sources:", response.sources);
+ *   logger.debug("Query response", { answer: response.answer, sources: response.sources });
  * };
  * ```
  */
@@ -288,7 +288,7 @@ export function useQueryKnowledgeBase(): UseMutationResult<
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to query knowledge base");
         setError(error);
-        console.error("Error querying knowledge base:", error);
+        logger.error("Error querying knowledge base", error, { query });
         throw error;
       } finally {
         setIsLoading(false);
@@ -338,7 +338,7 @@ export function useFileStatus(
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to fetch file status");
       setError(error);
-      console.error("Error fetching file status:", error);
+      logger.error("Error fetching file status", error, { fileId });
     } finally {
       setIsLoading(false);
     }

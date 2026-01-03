@@ -21,7 +21,7 @@
  * ```
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, type ReactNode } from "react";
 import { DateRange } from "react-day-picker";
 import {
   fetchKPIMetrics,
@@ -32,7 +32,8 @@ import {
   type ActivityItem,
 } from "@/lib/api/dashboard";
 import type { ActivityListItem } from "@/components/dashboard/ActivityList";
-import { User, AlertCircle, DollarSign, Phone, FileText, Clock } from "lucide-react";
+import { User as UserIcon, AlertCircle, DollarSign, Phone, FileText, Clock } from "lucide-react";
+import { logger } from "@/lib/logger";
 
 /**
  * Hook result with loading and error states
@@ -47,24 +48,24 @@ interface UseQueryResult<T> {
 /**
  * Map activity type to icon component
  */
-function getActivityIcon(type: ActivityItem["type"]): React.ReactNode {
+function getActivityIcon(type: ActivityItem["type"]): ReactNode {
   const iconProps = { className: "h-4 w-4" };
   
   switch (type) {
     case "client_intake":
-      return <User {...iconProps} />;
+      return React.createElement(UserIcon, iconProps);
     case "call":
-      return <Phone {...iconProps} />;
+      return React.createElement(Phone, iconProps);
     case "alert":
-      return <AlertCircle {...iconProps} />;
+      return React.createElement(AlertCircle, iconProps);
     case "payment":
-      return <DollarSign {...iconProps} />;
+      return React.createElement(DollarSign, iconProps);
     case "document":
-      return <FileText {...iconProps} />;
+      return React.createElement(FileText, iconProps);
     case "appointment":
-      return <Clock {...iconProps} />;
+      return React.createElement(Clock, iconProps);
     default:
-      return <User {...iconProps} />;
+      return React.createElement(UserIcon, iconProps);
   }
 }
 
@@ -79,7 +80,7 @@ function transformActivityItem(item: ActivityItem): ActivityListItem {
     timestamp: new Date(item.timestamp),
     onClick: () => {
       // Default click handler - can be overridden
-      console.log("Activity clicked:", item.id);
+      logger.debug("Activity clicked", { activityId: item.id });
     },
   };
 }

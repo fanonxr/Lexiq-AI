@@ -77,13 +77,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       "box-border",
       "px-3 py-2",
       "text-base",
-      "bg-zinc-800 border rounded-lg",
-      "text-white",
+      "bg-white border rounded-lg",
+      "text-zinc-900",
+      "dark:bg-zinc-800 dark:text-white",
       "transition-colors duration-200",
-      "focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-zinc-900",
+      "focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-white dark:focus:ring-offset-zinc-900",
       "disabled:opacity-50 disabled:cursor-not-allowed",
-      "placeholder:text-zinc-500",
-      "border-zinc-700",
+      "placeholder:text-zinc-500 dark:placeholder:text-zinc-500",
+      "border-zinc-300 dark:border-zinc-700",
     ];
 
     // State styles
@@ -93,8 +94,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           "focus:border-red-500 focus:ring-red-500",
         ]
       : [
-          "border-zinc-700",
-          "focus:border-zinc-500 focus:ring-zinc-500",
+          "border-zinc-300 dark:border-zinc-700",
+          "focus:border-zinc-600 focus:ring-zinc-600 dark:focus:border-zinc-500 dark:focus:ring-zinc-500",
         ];
 
     const inputClasses = clsx(
@@ -110,7 +111,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         {label && (
           <label
             htmlFor={inputId}
-            className="block text-sm font-medium text-white mb-1.5"
+            className="block text-sm font-medium text-zinc-900 dark:text-white mb-1.5"
           >
             {label}
             {required && (
@@ -122,7 +123,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         )}
         <div className="relative">
           {leftElement && (
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-white/60">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-white/60">
               {leftElement}
             </div>
           )}
@@ -136,7 +137,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             {...props}
           />
           {rightElement && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60">
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-white/60">
               {rightElement}
             </div>
           )}
@@ -151,7 +152,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           </p>
         )}
         {helperText && !error && (
-          <p id={helperId} className="mt-1.5 text-sm text-white/60">
+          <p id={helperId} className="mt-1.5 text-sm text-zinc-600 dark:text-white/60">
             {helperText}
           </p>
         )}

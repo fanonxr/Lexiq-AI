@@ -153,14 +153,15 @@ export function AppointmentCalendar({
             day_disabled: "text-muted-foreground opacity-50",
             day_range_middle: "aria-selected:bg-muted aria-selected:text-foreground",
             day_hidden: "invisible",
-            day_hasAppointments: "relative after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1.5 after:w-1.5 after:rounded-full after:bg-primary",
           }}
           modifiersClassNames={{
-            hasAppointments: "day_hasAppointments",
+            hasAppointments: "relative after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1.5 after:w-1.5 after:rounded-full after:bg-primary",
           }}
           components={{
-            IconLeft: () => <ChevronLeft className="h-4 w-4" />,
-            IconRight: () => <ChevronRight className="h-4 w-4" />,
+            Chevron: ({ orientation }) => {
+              const Icon = orientation === "left" ? ChevronLeft : ChevronRight;
+              return <Icon className="h-4 w-4" />;
+            },
           }}
         />
 

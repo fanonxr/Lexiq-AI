@@ -33,6 +33,7 @@ import {
 } from "@/lib/api/dashboard";
 import type { ActivityListItem } from "@/components/dashboard/ActivityList";
 import { User, AlertCircle, DollarSign, Phone, FileText, Clock } from "lucide-react";
+import { logger } from "@/lib/logger";
 
 /**
  * Hook result with loading and error states
@@ -79,7 +80,7 @@ function transformActivityItem(item: ActivityItem): ActivityListItem {
     timestamp: new Date(item.timestamp),
     onClick: () => {
       // Default click handler - can be overridden
-      console.log("Activity clicked:", item.id);
+      logger.debug("Activity clicked", { activityId: item.id });
     },
   };
 }

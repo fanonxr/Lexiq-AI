@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Edit, X, Copy, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
+import { logger } from "@/lib/logger";
 import { AppointmentStatusBadge } from "./AppointmentStatusBadge";
 
 /**
@@ -179,7 +180,7 @@ export function AppointmentList({
       setCopiedId(appointment.id);
       setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {
-      console.error("Failed to copy:", err);
+      logger.error("Failed to copy appointment text", err instanceof Error ? err : new Error(String(err)), { appointmentId: appointment.id });
     }
   };
 

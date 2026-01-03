@@ -42,6 +42,8 @@ import {
   type LoginRequest,
   type SignupRequest,
 } from "@/lib/api/auth";
+import { fetchUserProfile } from "@/lib/api/users";
+import { logger } from "@/lib/logger";
 
 /**
  * Default/fallback auth context value
@@ -96,8 +98,8 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
       window.location.search.includes("code")
     );
     
-    if (hasRedirectParams && process.env.NODE_ENV === "development") {
-      console.log("[AuthProvider] Detected redirect callback, processing...");
+    if (hasRedirectParams) {
+      logger.debug("Detected redirect callback, processing...");
     }
     
     // Handle redirect promise on mount
@@ -111,21 +113,17 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         
         if (response) {
           // Redirect was successful
-          if (process.env.NODE_ENV === "development") {
-            console.log("[AuthProvider] MSAL redirect handled successfully", {
-              account: response.account?.username,
-              hasAccessToken: !!response.accessToken,
-              accountId: response.account?.homeAccountId,
-            });
-          }
+          logger.debug("MSAL redirect handled successfully", {
+            account: response.account?.username,
+            hasAccessToken: !!response.accessToken,
+            accountId: response.account?.homeAccountId,
+          });
           // Clear any errors on successful redirect
           setError(null);
         } else {
           // No redirect response - this is normal if user didn't come from a redirect
           setIsProcessingRedirect(false);
-          if (process.env.NODE_ENV === "development") {
-            console.log("[AuthProvider] MSAL handleRedirectPromise: No redirect response (normal)");
-          }
+          logger.debug("MSAL handleRedirectPromise: No redirect response (normal)");
         }
       })
       .catch((err) => {
@@ -134,8 +132,9 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         setIsProcessingRedirect(false);
         
         // Redirect failed or was cancelled
-        console.error("[AuthProvider] MSAL redirect error:", err);
-        setError(err instanceof Error ? err : new Error("Authentication redirect failed"));
+        const error = err instanceof Error ? err : new Error("Authentication redirect failed");
+        logger.error("MSAL redirect error", error);
+        setError(error);
       });
     
     // If no redirect params, we're not processing a redirect
@@ -178,12 +177,21 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         return null;
       }
 
-      // Prevent multiple simultaneous token acquisition requests
+      // If token acquisition is already in progress, wait for it to complete
+      // instead of returning null immediately (prevents race conditions)
       if (isAcquiringToken) {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[AuthProvider] Token acquisition already in progress, skipping...");
+        logger.debug("Token acquisition already in progress, waiting...");
+        // Wait up to 5 seconds for the current acquisition to complete
+        let waitCount = 0;
+        const maxWait = 50; // 50 * 100ms = 5 seconds
+        while (isAcquiringToken && waitCount < maxWait) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          waitCount++;
         }
-        return null;
+        // If still acquiring after waiting, proceed with new request
+        if (isAcquiringToken) {
+          logger.warn("Token acquisition still in progress after waiting, proceeding anyway...");
+        }
       }
 
       try {
@@ -193,9 +201,11 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         // Request token for backend API (no scopes = uses backend client ID)
         const request = tokenRequest(scopes);
         
-        if (process.env.NODE_ENV === "development") {
-          console.log("[AuthProvider] Requesting token with scopes:", request.scopes);
-        }
+        logger.debug("Requesting token", {
+          scopes: request.scopes,
+          accountId: account?.homeAccountId,
+          forceRefresh: request.forceRefresh,
+        });
         
         const response: AuthenticationResult | null =
           await instance.acquireTokenSilent({
@@ -203,8 +213,8 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
             account: account,
           });
 
-        if (process.env.NODE_ENV === "development" && response) {
-          console.log("[AuthProvider] Token acquired successfully:", {
+        if (response) {
+          logger.debug("Token acquired successfully", {
             hasToken: !!response.accessToken,
             tokenLength: response.accessToken?.length || 0,
             scopes: response.scopes,
@@ -220,12 +230,42 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
                               err?.message?.includes("consent") ||
                               err?.message?.includes("AADSTS65001");
 
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[AuthProvider] Silent token acquisition failed:", {
-            errorCode: err?.errorCode,
-            errorMessage: err?.message,
-            isConsentError,
-          });
+        // Check if this is an iframe timeout error
+        const isIframeTimeout = err?.errorCode === "monitor_window_timeout" ||
+                                err?.message?.includes("monitor_window_timeout") ||
+                                err?.message?.includes("iframe") ||
+                                err?.message?.includes("Token acquisition in iframe failed");
+
+        logger.warn("Silent token acquisition failed", {
+          errorCode: err?.errorCode,
+          errorMessage: err?.message,
+          isConsentError,
+          isIframeTimeout,
+        });
+
+        // If iframe timeout, try interactive popup immediately (don't wait for consent check)
+        if (isIframeTimeout) {
+          logger.debug("Iframe timeout detected, trying interactive popup...");
+          try {
+            const request = tokenRequest(scopes);
+            const response: AuthenticationResult | null =
+              await instance.acquireTokenPopup({
+                ...request,
+                account: account,
+              });
+
+            if (response?.accessToken) {
+              setIsAcquiringToken(false);
+              logger.debug("Interactive popup succeeded after iframe timeout");
+              return response.accessToken;
+            }
+          } catch (popupErr: any) {
+            logger.warn("Interactive popup failed after iframe timeout", {
+              errorCode: popupErr?.errorCode,
+              errorMessage: popupErr?.message,
+            });
+            // Continue to consent error handling below
+          }
         }
 
         // If it's a consent error, we need admin consent in Azure Portal
@@ -241,9 +281,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
             
             // Try interactive popup once
             try {
-              if (process.env.NODE_ENV === "development") {
-                console.log("[AuthProvider] Consent error detected, trying interactive popup once...");
-              }
+              logger.debug("Consent error detected, trying interactive popup once...");
               
               const request = tokenRequest(scopes);
               const response: AuthenticationResult | null =
@@ -261,7 +299,9 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
               }
             } catch (popupErr) {
               // Popup failed, continue to show error
-              console.warn("[AuthProvider] Interactive popup also failed:", popupErr);
+              logger.warn("Interactive popup also failed", {
+                error: popupErr instanceof Error ? popupErr.message : String(popupErr),
+              });
             }
           }
           
@@ -276,15 +316,13 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
             "See /docs/connection/AZURE_AD_SETUP.md for detailed instructions."
           );
           setError(error);
-          console.error("[AuthProvider] Consent required - check Azure Portal configuration");
+          logger.error("Consent required - check Azure Portal configuration", error);
           return null;
         }
 
         // For other errors, try interactive popup (but only once)
         try {
-          if (process.env.NODE_ENV === "development") {
-            console.log("[AuthProvider] Attempting interactive token acquisition...");
-          }
+          logger.debug("Attempting interactive token acquisition...");
           
           const request = tokenRequest(scopes);
           const response: AuthenticationResult | null =
@@ -310,7 +348,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
               "See /docs/connection/GRANT_CONSENT_QUICK.md for instructions."
             );
             setError(error);
-            console.error("[AuthProvider] Consent required after interactive attempt");
+            logger.error("Consent required after interactive attempt", error);
             return null;
           }
 
@@ -319,7 +357,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
               ? interactiveErr
               : new Error("Failed to acquire token");
           setError(error);
-          console.error("[AuthProvider] Interactive token acquisition failed:", error);
+          logger.error("Interactive token acquisition failed", error);
           return null;
         }
       }
@@ -332,35 +370,47 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
    * This allows the API client to get MSAL tokens
    */
   useEffect(() => {
-    if (account) {
+    if (account && instance) {
       // Set token getter to use MSAL
       const tokenGetter = async () => {
         try {
-          if (process.env.NODE_ENV === "development") {
-            console.log("[AuthProvider] Token getter called, requesting token...", {
-              accountId: account.homeAccountId,
-              accountName: account.name,
-              hasInstance: !!instance,
-              isAcquiringToken,
-            });
+          logger.debug("Token getter called, requesting token...", {
+            accountId: account.homeAccountId,
+            accountName: account.name,
+            hasInstance: !!instance,
+            isAcquiringToken,
+          });
+          
+          // Ensure account is still valid
+          if (!account) {
+            logger.warn("No account available for token acquisition");
+            return null;
           }
           
-          // If token acquisition is already in progress, wait a bit and try again
+          // If token acquisition is already in progress, wait and retry
           if (isAcquiringToken) {
-            console.warn("[AuthProvider] Token acquisition in progress, waiting 500ms...");
+            logger.debug("Token acquisition in progress, waiting 500ms...");
             await new Promise(resolve => setTimeout(resolve, 500));
+            
             // Try again after waiting
             if (isAcquiringToken) {
-              console.warn("[AuthProvider] Still acquiring token, using direct MSAL call");
-              // Bypass getAccessToken and call MSAL directly
-              const silentRequest = tokenRequest();
-              const result = await instance.acquireTokenSilent({
-                ...silentRequest,
-                account: account,
-              });
-              if (result?.accessToken) {
-                console.log("[AuthProvider] Direct MSAL token acquisition successful");
-                return result.accessToken;
+              logger.debug("Still acquiring token, using direct MSAL call");
+              // Bypass getAccessToken and call MSAL directly to avoid deadlock
+              try {
+                const request = tokenRequest();
+                const result = await instance.acquireTokenSilent({
+                  ...request,
+                  account: account,
+                });
+                if (result?.accessToken) {
+                  logger.debug("Direct MSAL token acquisition successful");
+                  return result.accessToken;
+                }
+              } catch (directError: any) {
+                logger.error("Direct MSAL call failed", directError instanceof Error ? directError : new Error(String(directError)), {
+                  errorCode: directError?.errorCode,
+                  errorMessage: directError?.message,
+                });
               }
               return null;
             }
@@ -369,68 +419,59 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
           // Call getAccessToken to get a fresh token
           const token = await getAccessToken();
           
-          if (!token) {
-            console.warn("[AuthProvider] getAccessToken returned null/undefined, trying direct MSAL call");
-            // Try to get token directly from instance as fallback
-            try {
-              const silentRequest = tokenRequest();
-              const result = await instance.acquireTokenSilent({
-                ...silentRequest,
-                account: account,
-              });
-              if (result?.accessToken) {
-                if (process.env.NODE_ENV === "development") {
-                  console.log("[AuthProvider] Fallback token acquisition successful");
-                }
-                return result.accessToken;
-              } else {
-                console.error("[AuthProvider] Fallback MSAL call returned no token");
-              }
-            } catch (fallbackError: any) {
-              console.error("[AuthProvider] Fallback token acquisition failed:", {
-                errorCode: fallbackError?.errorCode,
-                errorMessage: fallbackError?.message,
-                error: fallbackError,
-              });
-            }
-            return null;
-          }
-          
-          if (process.env.NODE_ENV === "development") {
-            console.log("[AuthProvider] Token retrieved for API client:", {
+          if (token) {
+            logger.debug("Token retrieved for API client", {
               hasToken: !!token,
-              tokenLength: token?.length || 0,
+              tokenLength: token.length,
               accountId: account.homeAccountId,
             });
+            return token;
           }
-          return token;
+          
+          // If getAccessToken returned null, try direct MSAL call as fallback
+          logger.warn("getAccessToken returned null, trying direct MSAL call");
+          try {
+            const request = tokenRequest();
+            const result = await instance.acquireTokenSilent({
+              ...request,
+              account: account,
+            });
+            if (result?.accessToken) {
+              logger.debug("Fallback token acquisition successful");
+              return result.accessToken;
+            } else {
+              logger.error("Fallback MSAL call returned no token");
+            }
+          } catch (fallbackError: any) {
+            logger.error("Fallback token acquisition failed", fallbackError instanceof Error ? fallbackError : new Error(String(fallbackError)), {
+              errorCode: fallbackError?.errorCode,
+              errorMessage: fallbackError?.message,
+            });
+          }
+          
+          return null;
         } catch (error: any) {
-          console.error("[AuthProvider] Failed to get access token in token getter:", {
+          logger.error("Failed to get access token in token getter", error instanceof Error ? error : new Error(String(error)), {
             errorCode: error?.errorCode,
             errorMessage: error?.message,
-            error: error,
           });
           return null;
         }
       };
       
       setTokenGetter(tokenGetter);
-      if (process.env.NODE_ENV === "development") {
-        console.log("[AuthProvider] Token getter set for account:", account.homeAccountId);
-      }
+      logger.debug("Token getter set for account", { accountId: account.homeAccountId });
     } else {
-      // Clear token getter if no account
+      // Clear token getter if no account or instance
       setTokenGetter(null);
-      if (process.env.NODE_ENV === "development") {
-        console.log("[AuthProvider] Token getter cleared (no account)");
-      }
+      logger.debug("Token getter cleared (no account or instance)");
     }
 
     // Cleanup on unmount
     return () => {
       setTokenGetter(null);
     };
-  }, [account, getAccessToken]);
+  }, [account, instance, getAccessToken, isAcquiringToken]);
 
   /**
    * Check for email/password authentication token on mount
@@ -447,20 +488,83 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
   }, [account]);
 
   /**
-   * Update user profile from account (MSAL) or email auth
+   * Fetch user profile from API when authenticated
+   * This ensures we have complete user information including name
    */
   useEffect(() => {
-    if (account) {
-      // MSAL authentication
-      setUser(extractUserProfile(account));
-      setEmailAuthUser(null);
-    } else if (emailAuthUser) {
-      // Email/password authentication
-      setUser(emailAuthUser);
-    } else {
-      setUser(null);
-    }
-  }, [account, emailAuthUser, extractUserProfile]);
+    let isMounted = true;
+    let timeoutId: NodeJS.Timeout | null = null;
+    
+    const loadUserProfile = async () => {
+      // Wait until authentication is complete (not loading)
+      if (isLoading || isProcessingRedirect) {
+        return;
+      }
+
+      // Only fetch if we're authenticated (have account or email auth token)
+      const hasAuth = account || emailAuthUser || getAuthToken() !== null;
+      if (!hasAuth) {
+        setUser(null);
+        return;
+      }
+
+      try {
+        // Try to fetch full user profile from API
+        const profile = await fetchUserProfile();
+        
+        if (isMounted && profile) {
+          // Use API profile which has complete information
+          setUser({
+            id: profile.id,
+            name: profile.name,
+            email: profile.email,
+            username: profile.username,
+          });
+        }
+      } catch (error) {
+        // If API call fails, fall back to MSAL/email auth profile
+        if (isMounted) {
+          if (account) {
+            // MSAL authentication - use extracted profile
+            setUser(extractUserProfile(account));
+            setEmailAuthUser(null);
+          } else if (emailAuthUser) {
+            // Email/password authentication
+            setUser(emailAuthUser);
+          } else {
+            // Try to extract from token if available
+            const token = getAuthToken();
+            if (token) {
+              // For email auth, we might not have full profile yet
+              // Keep user as null and let it be set elsewhere
+              setUser(null);
+            } else {
+              setUser(null);
+            }
+          }
+        }
+        
+        // Only log error if we're actually authenticated (not just a network issue)
+        if (account || emailAuthUser || getAuthToken()) {
+          logger.warn("Failed to fetch user profile from API, using fallback", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    };
+
+    // Small delay to ensure auth state is stable
+    timeoutId = setTimeout(() => {
+      loadUserProfile();
+    }, 100);
+
+    return () => {
+      isMounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [account, emailAuthUser, extractUserProfile, isLoading, isProcessingRedirect]);
 
   /**
    * Update loading state
@@ -698,18 +802,16 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
   
   // Debug logging in development
   useEffect(() => {
-    if (process.env.NODE_ENV === "development") {
-      console.log("[AuthProvider] Auth state:", {
-        isAuthenticated,
-        isAuthenticatedEnhanced,
-        isLoading,
-        hasAccount: !!account,
-        accountsCount: accounts.length,
-        inProgress,
-        isProcessingRedirect,
-        hasEmailToken: getAuthToken() !== null,
-      });
-    }
+    logger.debug("Auth state", {
+      isAuthenticated,
+      isAuthenticatedEnhanced,
+      isLoading,
+      hasAccount: !!account,
+      accountsCount: accounts.length,
+      inProgress,
+      isProcessingRedirect,
+      hasEmailToken: getAuthToken() !== null,
+    });
   }, [isAuthenticated, isAuthenticatedEnhanced, isLoading, account, accounts.length, inProgress, isProcessingRedirect]);
 
   /**
@@ -771,7 +873,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const instance = await getMsalInstance();
         setMsalInstance(instance);
       } catch (error) {
-        console.error("Failed to initialize MSAL:", error);
+        logger.error("Failed to initialize MSAL", error instanceof Error ? error : new Error(String(error)));
         // Continue without MSAL - auth will not work but app won't crash
       }
     })();

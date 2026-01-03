@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
  *     { start: 0, end: 5, text: "Hello", speaker: "AI" },
  *     { start: 5, end: 10, text: "Hi there", speaker: "Caller" },
  *   ]}
- *   onTimeUpdate={(time) => console.log("Current time:", time)}
+ *   onTimeUpdate={(time) =>  ("Current time:", time)}
  * />
  * 
  * // Without audioUrl (shows placeholder)

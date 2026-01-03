@@ -34,6 +34,7 @@ import {
   type IntegrationStatus,
   type SyncAppointmentsResponse,
 } from "@/lib/api/appointments";
+import { logger } from "@/lib/logger";
 import type { IntegrationType } from "@/components/appointments/IntegrationHealthCard";
 import type { AppointmentType, AppointmentStatus } from "@/components/appointments/AppointmentList";
 
@@ -41,7 +42,7 @@ import type { AppointmentType, AppointmentStatus } from "@/components/appointmen
  * Hook result with loading and error states
  */
 interface UseQueryResult<T> {
-  data: T | null;
+  data: T | null | undefined;
   isLoading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
@@ -52,6 +53,16 @@ interface UseQueryResult<T> {
  */
 interface UseMutationResult<TData, TVariables> {
   mutate: (variables: TVariables) => Promise<TData>;
+  isLoading: boolean;
+  error: Error | null;
+  reset: () => void;
+}
+
+/**
+ * Mutation result with optional variables (for mutations that don't require parameters)
+ */
+interface UseMutationResultOptional<TData> {
+  mutate: (variables?: never) => Promise<TData>;
   isLoading: boolean;
   error: Error | null;
   reset: () => void;
@@ -89,7 +100,7 @@ export function useAppointments(
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to fetch appointments");
       setError(error);
-      console.error("Error fetching appointments:", error);
+      logger.error("Error fetching appointments", error);
     } finally {
       setIsLoading(false);
     }
@@ -126,7 +137,7 @@ export function useIntegrationStatus(): UseQueryResult<IntegrationStatus[]> {
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to fetch integration status");
       setError(error);
-      console.error("Error fetching integration status:", error);
+      logger.error("Error fetching integration status", error);
     } finally {
       setIsLoading(false);
     }
@@ -153,10 +164,9 @@ export function useIntegrationStatus(): UseQueryResult<IntegrationStatus[]> {
  * };
  * ```
  */
-export function useSyncAppointments(): UseMutationResult<
-  SyncAppointmentsResponse,
-  IntegrationType | undefined
-> {
+export function useSyncAppointments(): UseMutationResultOptional<SyncAppointmentsResponse> & {
+  mutate: (integration?: IntegrationType) => Promise<SyncAppointmentsResponse>;
+} {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -170,7 +180,7 @@ export function useSyncAppointments(): UseMutationResult<
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to sync appointments");
         setError(error);
-        console.error("Error syncing appointments:", error);
+        logger.error("Error syncing appointments", error);
         throw error;
       } finally {
         setIsLoading(false);
@@ -231,7 +241,7 @@ export function useUpdateAppointment(): UseMutationResult<
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to update appointment");
         setError(error);
-        console.error("Error updating appointment:", error);
+        logger.error("Error updating appointment", error, { appointmentId: data.appointmentId });
         throw error;
       } finally {
         setIsLoading(false);
@@ -284,7 +294,7 @@ export function useCancelAppointment(): UseMutationResult<
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to cancel appointment");
         setError(error);
-        console.error("Error cancelling appointment:", error);
+        logger.error("Error cancelling appointment", error, { appointmentId: data.appointmentId });
         throw error;
       } finally {
         setIsLoading(false);
@@ -324,7 +334,7 @@ export function useAppointmentSources(): UseQueryResult<Record<string, Integrati
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to fetch appointment sources");
       setError(error);
-      console.error("Error fetching appointment sources:", error);
+      logger.error("Error fetching appointment sources", error);
     } finally {
       setIsLoading(false);
     }

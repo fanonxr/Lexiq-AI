@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
  * @example
  * ```tsx
  * <CallListItem
- *   call={{
+ *   call={{ 
  *     id: "1",
  *     callerName: "John Doe",
  *     status: "new_client",
@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
  *     timestamp: new Date(),
  *   }}
  *   isSelected={false}
- *   onClick={() => console.log("Call selected")}
+ *   onClick={() => logger.debug("Call selected", { callId: "1" })}
  * />
  * ```
  */

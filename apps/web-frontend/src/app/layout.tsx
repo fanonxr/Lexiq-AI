@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/components/providers/AuthProvider";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -43,6 +44,12 @@ export const metadata: Metadata = {
     description:
       "AI-powered voice assistant for law firms. Answer calls, manage schedules, and integrate with legal CRMs.",
   },
+  icons: {
+    icon: [
+      { url: '/icons/lexiq-ai-icon.svg', type: 'image/svg+xml', sizes: '32x32' },
+      { url: '/icons/lexiq-ai-icon.svg', type: 'image/svg+xml', sizes: '16x16' },
+    ]
+  },
 };
 
 export default function RootLayout({
@@ -56,7 +63,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
       >
-        <AuthProvider>{children}</AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

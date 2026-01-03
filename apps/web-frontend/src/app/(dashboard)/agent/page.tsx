@@ -1,5 +1,7 @@
 "use client";
 
+import { Suspense } from "react";
+
 import { useState, useEffect, useCallback } from "react";
 import { VoiceLabGrid, type VoiceOption } from "@/components/agent/VoiceLabGrid";
 import { ScriptingInput } from "@/components/agent/ScriptingInput";
@@ -9,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAgentConfig, useUpdateAgentConfig, useVoiceOptions, useTestCall, useImproveScript } from "@/hooks/useAgent";
+import { logger } from "@/lib/logger";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
@@ -30,7 +33,7 @@ export const dynamic = "force-dynamic";
  * - Auto-save functionality
  * - Test playground for testing configuration
  */
-export default function AgentPage() {
+function AgentPageContent() {
   // Fetch agent config and voice options
   const { data: config, isLoading: configLoading, error: configError, refetch: refetchConfig } = useAgentConfig();
   const { data: voiceOptions = [], isLoading: voicesLoading } = useVoiceOptions();
@@ -98,7 +101,7 @@ export default function AgentPage() {
         setShowSavedIndicator(false);
       }, 2000);
     } catch (error) {
-      console.error("Failed to save agent configuration:", error);
+      logger.error("Failed to save agent configuration", error instanceof Error ? error : new Error(String(error)));
     }
   }, [selectedVoice, greetingScript, closingScript, transferScript, autoRespond, recordCalls, autoTranscribe, enableVoicemail, updateConfig]);
 
@@ -107,7 +110,7 @@ export default function AgentPage() {
       const improved = await improveScript({ script: greetingScript, scriptType: "greeting" });
       setGreetingScript(improved);
     } catch (error) {
-      console.error("Failed to improve greeting script:", error);
+      logger.error("Failed to improve greeting script", error instanceof Error ? error : new Error(String(error)));
     }
   };
 
@@ -116,7 +119,7 @@ export default function AgentPage() {
       const improved = await improveScript({ script: closingScript, scriptType: "closing" });
       setClosingScript(improved);
     } catch (error) {
-      console.error("Failed to improve closing script:", error);
+      logger.error("Failed to improve closing script", error instanceof Error ? error : new Error(String(error)));
     }
   };
 
@@ -125,7 +128,7 @@ export default function AgentPage() {
       const improved = await improveScript({ script: transferScript, scriptType: "transfer" });
       setTransferScript(improved);
     } catch (error) {
-      console.error("Failed to improve transfer script:", error);
+      logger.error("Failed to improve transfer script", error instanceof Error ? error : new Error(String(error)));
     }
   };
 
@@ -134,7 +137,7 @@ export default function AgentPage() {
       await testCall(phoneNumber);
       // Success message could be shown here
     } catch (error) {
-      console.error("Failed to initiate test call:", error);
+      logger.error("Failed to initiate test call", error instanceof Error ? error : new Error(String(error)), { phoneNumber });
     }
   };
 
@@ -272,6 +275,14 @@ export default function AgentPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AgentPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AgentPageContent />
+    </Suspense>
   );
 }
 

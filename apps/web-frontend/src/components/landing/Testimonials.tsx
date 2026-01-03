@@ -33,18 +33,18 @@ export const TestimonialsColumn: React.FC<TestimonialsColumnProps> = ({
           ease: "linear",
           repeatType: "loop",
         }}
-        className="flex flex-col gap-6 pb-6 bg-transparent"
+        className="flex flex-col gap-8 pb-6 bg-transparent"
       >
         {[
           ...new Array(2).fill(0).map((_, index) => (
             <React.Fragment key={index}>
               {testimonials.map(({ text, image, name, role }, i) => (
                 <div
-                  className="p-10 rounded-3xl border border-zinc-200 bg-white shadow-lg max-w-xs w-full dark:border-zinc-800 dark:bg-zinc-900"
+                  className="p-12 rounded-3xl border border-zinc-200 bg-white shadow-lg w-full min-w-[320px] max-w-md dark:border-zinc-800 dark:bg-zinc-900"
                   key={`testimonial-${index}-${i}`}
                 >
-                  <div className="text-zinc-700 dark:text-zinc-300">{text}</div>
-                  <div className="flex items-center gap-2 mt-5">
+                  <div className="text-zinc-700 dark:text-zinc-300 text-base leading-relaxed">{text}</div>
+                  <div className="flex items-center gap-3 mt-8">
                     <div
                       className="h-10 w-10 rounded-full bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center text-xs font-semibold text-zinc-600 dark:text-zinc-400"
                       style={{
@@ -55,11 +55,11 @@ export const TestimonialsColumn: React.FC<TestimonialsColumnProps> = ({
                     >
                       {image.startsWith("data:") && name[0]?.toUpperCase()}
                     </div>
-                    <div className="flex flex-col">
-                      <div className="font-medium tracking-tight leading-5 text-zinc-900 dark:text-zinc-100">
+                    <div className="flex flex-col gap-0.5">
+                      <div className="font-medium tracking-tight leading-6 text-zinc-900 dark:text-zinc-100">
                         {name}
                       </div>
-                      <div className="leading-5 opacity-60 tracking-tight text-zinc-600 dark:text-zinc-400">
+                      <div className="leading-6 opacity-60 tracking-tight text-zinc-600 dark:text-zinc-400 text-sm">
                         {role}
                       </div>
                     </div>
@@ -158,7 +158,7 @@ export function Testimonials({
           </p>
         </motion.div>
 
-        <div className="flex justify-center gap-6 mt-10 [mask-image:linear-gradient(to_bottom,transparent,black_25%,black_75%,transparent)] max-h-[740px] overflow-hidden">
+        <div className="flex justify-center gap-8 mt-10 [mask-image:linear-gradient(to_bottom,transparent,black_25%,black_75%,transparent)] max-h-[800px] overflow-hidden w-full max-w-7xl mx-auto">
           <TestimonialsColumn testimonials={firstColumn} duration={15} />
           <TestimonialsColumn
             testimonials={secondColumn}

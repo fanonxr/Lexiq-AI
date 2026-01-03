@@ -21,6 +21,7 @@ import {
 } from "@/lib/api/firms";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { fetchUserProfile } from "@/lib/api/users";
+import { logger } from "@/lib/logger";
 
 interface FirmPhoneNumberSettingsProps {
   firmId?: string; // Optional - defaults to user ID
@@ -38,11 +39,9 @@ export function FirmPhoneNumberSettings({ firmId }: FirmPhoneNumberSettingsProps
         setIsLoadingProfile(true);
         const profile = await fetchUserProfile();
         setUserProfile(profile);
-        if (process.env.NODE_ENV === "development") {
-          console.log("[FirmPhoneNumberSettings] Fetched user profile from API:", profile);
-        }
+        logger.debug("Fetched user profile from API", { userId: profile?.id, firmId: profile?.firm_id });
       } catch (err) {
-        console.error("[FirmPhoneNumberSettings] Error fetching user profile:", err);
+        logger.error("Error fetching user profile", err instanceof Error ? err : new Error(String(err)));
         // Fall back to user from context if API fails
         setUserProfile(user);
       } finally {
@@ -58,15 +57,12 @@ export function FirmPhoneNumberSettings({ firmId }: FirmPhoneNumberSettingsProps
   
   // Debug logging
   useEffect(() => {
-    if (process.env.NODE_ENV === "development") {
-      console.log("[FirmPhoneNumberSettings] User profile:", {
-        userId: user?.id,
-        apiFirmId: userProfile?.firm_id,
-        contextFirmId: (user as any)?.firm_id,
-        effectiveFirmId,
-        userProfile,
-      });
-    }
+    logger.debug("User profile", {
+      userId: user?.id,
+      apiFirmId: userProfile?.firm_id,
+      contextFirmId: (user as any)?.firm_id,
+      effectiveFirmId,
+    });
   }, [user, userProfile, effectiveFirmId]);
   
   const [phoneNumber, setPhoneNumber] = useState<FirmPhoneNumberResponse | null>(null);
@@ -95,7 +91,7 @@ export function FirmPhoneNumberSettings({ firmId }: FirmPhoneNumberSettingsProps
         // 404 is expected if no phone number exists yet
         // 403 is authorization error - log it but don't show error (user might not have firm_id yet)
         if (err.status === 403) {
-          console.warn("[FirmPhoneNumberSettings] Authorization error loading phone number:", {
+          logger.warn("Authorization error loading phone number", {
             error: err.message,
             firmId: effectiveFirmId,
             userId: user?.id,
@@ -122,16 +118,14 @@ export function FirmPhoneNumberSettings({ firmId }: FirmPhoneNumberSettingsProps
     }
 
     // Debug logging
-    if (process.env.NODE_ENV === "development") {
-      console.log("[FirmPhoneNumberSettings] Provisioning phone number:", {
-        effectiveFirmId,
-        firmIdType: typeof effectiveFirmId,
-        firmIdLength: effectiveFirmId.length,
-        user: user,
-        userFirmId: (user as any)?.firm_id,
-        userId: user?.id,
-      });
-    }
+    logger.debug("Provisioning phone number", {
+      effectiveFirmId,
+      firmIdType: typeof effectiveFirmId,
+      firmIdLength: effectiveFirmId.length,
+      userFirmId: (user as any)?.firm_id,
+      userId: user?.id,
+      areaCode,
+    });
 
     try {
       setIsProvisioning(true);
@@ -150,12 +144,15 @@ export function FirmPhoneNumberSettings({ firmId }: FirmPhoneNumberSettingsProps
         const updatedProfile = await fetchUserProfile();
         setUserProfile(updatedProfile);
       } catch (err) {
-        console.error("Error refreshing user profile:", err);
+        logger.error("Error refreshing user profile", err instanceof Error ? err : new Error(String(err)));
       }
     } catch (err: any) {
       const errorMessage = err.message || "Failed to provision phone number";
       setError(errorMessage);
-      console.error("Error provisioning phone number:", err);
+      logger.error("Error provisioning phone number", err instanceof Error ? err : new Error(String(err)), {
+        effectiveFirmId,
+        areaCode,
+      });
     } finally {
       setIsProvisioning(false);
     }
@@ -185,7 +182,7 @@ export function FirmPhoneNumberSettings({ firmId }: FirmPhoneNumberSettingsProps
       </CardHeader>
       <CardContent className="space-y-4">
         {error && (
-          <Alert variant="destructive">
+          <Alert variant="error">
             <AlertCircle className="h-4 w-4" />
             <span>{error}</span>
           </Alert>

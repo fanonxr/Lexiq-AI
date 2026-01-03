@@ -11,6 +11,12 @@ export const metadata: Metadata = {
     index: false, // Don't index auth pages
     follow: false,
   },
+  icons: {
+    icon: [
+      { url: '/icons/lexiq-ai-icon.svg', type: 'image/svg+xml', sizes: '32x32' },
+      { url: '/icons/lexiq-ai-icon.svg', type: 'image/svg+xml', sizes: '16x16' },
+    ]
+  },
 };
 
 /**

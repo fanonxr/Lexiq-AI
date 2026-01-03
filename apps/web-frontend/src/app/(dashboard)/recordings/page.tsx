@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Phone, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCalls, useCallDetails, useAudioUrl } from "@/hooks/useInbox";
+import { logger } from "@/lib/logger";
 
 // Lazy load heavy audio player component (includes wavesurfer.js)
 const AudioPlayer = lazy(() => 
@@ -20,8 +21,8 @@ const AudioPlayer = lazy(() =>
   }))
 );
 
-// Re-export types for use in this file
-export type { AudioPlayerRef, TranscriptSegment } from "@/components/inbox/AudioPlayer";
+// Import types for use in this file
+import type { AudioPlayerRef, TranscriptSegment } from "@/components/inbox/AudioPlayer";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
@@ -45,7 +46,7 @@ export default function RecordingsPage() {
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const audioPlayerRef = useRef<AudioPlayerRef>(null);
+  const audioPlayerRef = useRef<React.ComponentRef<typeof AudioPlayer>>(null);
 
   // Fetch calls using hooks
   const { data: calls, isLoading: isLoadingCalls, error: callsError, refetch: refetchCalls } = useCalls(activeFilter);
@@ -258,10 +259,10 @@ export default function RecordingsPage() {
               </div>
               <div className="flex-shrink-0">
                 <ActionToolbar
-                  onCall={() => console.log("Call clicked")}
-                  onMail={() => console.log("Mail clicked")}
-                  onArchive={() => console.log("Archive clicked")}
-                  onExport={() => console.log("Export clicked")}
+                  onCall={() => logger.debug("Call clicked", { callId: selectedCall.id })}
+                  onMail={() => logger.debug("Mail clicked", { callId: selectedCall.id })}
+                  onArchive={() => logger.debug("Archive clicked", { callId: selectedCall.id })}
+                  onExport={() => logger.debug("Export clicked", { callId: selectedCall.id })}
                 />
               </div>
             </div>
@@ -327,10 +328,10 @@ export default function RecordingsPage() {
                 onTimeUpdate={handleTimeUpdate}
               />
               <ActionToolbar
-                onCall={() => console.log("Call clicked")}
-                onMail={() => console.log("Mail clicked")}
-                onArchive={() => console.log("Archive clicked")}
-                onExport={() => console.log("Export clicked")}
+                onCall={() => logger.debug("Call clicked", { callId: selectedCall.id })}
+                onMail={() => logger.debug("Mail clicked", { callId: selectedCall.id })}
+                onArchive={() => logger.debug("Archive clicked", { callId: selectedCall.id })}
+                onExport={() => logger.debug("Export clicked", { callId: selectedCall.id })}
               />
               {isLoadingCallDetails ? (
                 <div className="h-32 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-800" />

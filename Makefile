@@ -111,6 +111,9 @@ docker-rebuild: ## Rebuild and restart all services
 docker-rebuild-api-core: ## Rebuild and restart api-core service
 	$(DOCKER_COMPOSE) up -d --build api-core
 
+docker-rebuild-api-core-no-cache: ## Rebuild and restart api-core service without using cache
+	$(DOCKER_COMPOSE) build --no-cache api-core
+
 docker-rebuild-cognitive-orch: ## Rebuild and restart cognitive-orch service
 	$(DOCKER_COMPOSE) up -d --build cognitive-orch
 

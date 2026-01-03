@@ -58,7 +58,7 @@ export default function DashboardLayout({
         Skip to main content
       </a>
 
-      <div className="flex min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="fixed inset-0 flex h-screen w-full bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 overflow-hidden">
         {/* Sidebar */}
         <Sidebar
           mobileOpen={mobileMenuOpen}
@@ -68,7 +68,7 @@ export default function DashboardLayout({
         {/* Main Content */}
         <main id="main-content" className="flex flex-1 flex-col overflow-hidden md:ml-0" role="main">
           {/* Top Bar */}
-          <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-900 sm:px-6 lg:px-8" role="banner">
+          <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-zinc-200 bg-white text-zinc-900 px-4 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:px-6 lg:px-8" role="banner">
             <div className="flex flex-1 items-center">
               {/* Mobile: Add spacing for menu button */}
               <div className="md:hidden w-12" />
@@ -84,7 +84,7 @@ export default function DashboardLayout({
           </header>
 
           {/* Page Content */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto bg-white dark:bg-zinc-950">
             <div className="p-4 sm:p-6 lg:p-8">{children}</div>
           </div>
         </main>

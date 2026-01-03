@@ -9,6 +9,7 @@
 
 import { Configuration, BrowserCacheLocation, LogLevel } from "@azure/msal-browser";
 import { getEnv } from "@/lib/config/browser/env";
+import { logger } from "@/lib/logger";
 
 /**
  * MSAL Configuration
@@ -155,24 +156,56 @@ export const tokenRequest = (scopes?: string[]) => {
   const sameAppRegistration = apiClientId === frontendClientId;
   
   // Check if we should use API scope format
+  // If API is exposed in Azure Portal (which is required for AADSTS90009 fix),
+  // we MUST use api:// format, not {client-id}/.default
   const useApiScope = process.env.NEXT_PUBLIC_USE_API_SCOPE === "true";
+  
+  // Check if custom scope is specified (e.g., access_as_user)
+  const customScope = process.env.NEXT_PUBLIC_API_SCOPE_NAME; // e.g., "access_as_user"
   
   let defaultScope: string;
   
-  if (sameAppRegistration && !useApiScope) {
-    // Same app registration: Use client ID directly (GUID format)
-    // This is required when requesting a token for the same app
-    defaultScope = apiClientId;
+  // IMPORTANT: If you exposed an API in Azure Portal (set Application ID URI),
+  // you MUST use api:// format, even for same app registration.
+  // This is required to fix AADSTS90009 error.
+  // 
+  // When API is exposed, Azure AD expects: api://{client-id}/.default
+  // NOT: {client-id}/.default
+  if (useApiScope || (sameAppRegistration && process.env.NEXT_PUBLIC_FORCE_API_SCOPE === "true")) {
+    // Use API scope format (required when API is exposed in Azure Portal)
+    if (customScope) {
+      // Use custom scope if specified (e.g., api://{client-id}/access_as_user)
+      defaultScope = `api://${apiClientId}/${customScope}`;
+    } else {
+      // Use .default scope (e.g., api://{client-id}/.default)
+      defaultScope = `api://${apiClientId}/.default`;
+    }
+  } else if (sameAppRegistration) {
+    // Same app registration WITHOUT exposed API: Use client ID with /.default
+    // Format: {client-id}/.default (e.g., "61e4d2bb-02df-4de1-8bd4-b26d5e2b53d9/.default")
+    // NOTE: This will fail with AADSTS90009 if API is exposed in Azure Portal
+    // If you get AADSTS90009, set NEXT_PUBLIC_FORCE_API_SCOPE=true
+    defaultScope = `${apiClientId}/.default`;
   } else {
-    // Different app registrations OR explicitly using API scope:
-    // Use API scope format (requires API to be exposed in Azure Portal)
-    defaultScope = `api://${apiClientId}/.default`;
+    // Different app registrations: Use API scope format
+    if (customScope) {
+      defaultScope = `api://${apiClientId}/${customScope}`;
+    } else {
+      defaultScope = `api://${apiClientId}/.default`;
+    }
   }
   
-  if (process.env.NODE_ENV === "development") {
-    console.log("[MSAL Config] Token request scope:", defaultScope);
-    console.log("[MSAL Config] Same app registration:", sameAppRegistration);
-  }
+  // Log token request configuration
+  logger.debug("Token request configuration", {
+    defaultScope,
+    sameAppRegistration,
+    apiClientId,
+    frontendClientId,
+    useApiScope,
+    customScope,
+    hasApiClientIdEnv: !!process.env.NEXT_PUBLIC_API_CLIENT_ID,
+    forceApiScope: process.env.NEXT_PUBLIC_FORCE_API_SCOPE === "true",
+  });
   
   return {
     scopes: scopes || [defaultScope],

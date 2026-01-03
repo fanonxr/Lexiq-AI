@@ -55,8 +55,9 @@ export function Card({
     <div
       className={clsx(
         // Base styles - border-based structure (no shadows)
-        "border border-zinc-200 bg-white",
-        "dark:border-zinc-800 dark:bg-zinc-900",
+        // Light mode: white background, dark mode: dark background
+        "border border-zinc-200 bg-white text-zinc-900",
+        "dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100",
         // Border radius - matches design system (rounded-md: 6px, rounded-lg: 8px)
         radius === "md" ? "rounded-md" : "rounded-lg",
         // Hover effect - subtle border color transition
@@ -122,7 +123,7 @@ export function CardDescription({
   return (
     <p
       className={clsx(
-        "text-sm text-zinc-500 dark:text-zinc-400",
+        "text-sm text-zinc-600 dark:text-zinc-400",
         className
       )}
       {...props}

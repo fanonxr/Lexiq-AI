@@ -23,6 +23,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
+import { logger } from "@/lib/logger";
 import {
   fetchAgentConfig,
   updateAgentConfig,
@@ -77,7 +78,7 @@ export function useAgentConfig(): UseQueryResult<AgentConfig> {
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to fetch agent config");
       setError(error);
-      console.error("Error fetching agent config:", error);
+      logger.error("Error fetching agent config", error);
     } finally {
       setIsLoading(false);
     }
@@ -117,7 +118,7 @@ export function useUpdateAgentConfig(): UseMutationResult<AgentConfig, Partial<A
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to update agent config");
       setError(error);
-      console.error("Error updating agent config:", error);
+      logger.error("Error updating agent config", error);
       throw error;
     } finally {
       setIsLoading(false);
@@ -155,7 +156,7 @@ export function useVoiceOptions(): UseQueryResult<VoiceOption[]> {
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to fetch voice options");
       setError(error);
-      console.error("Error fetching voice options:", error);
+      logger.error("Error fetching voice options", error);
     } finally {
       setIsLoading(false);
     }
@@ -201,7 +202,7 @@ export function useTestCall(): UseMutationResult<
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to initiate test call");
       setError(error);
-      console.error("Error initiating test call:", error);
+      logger.error("Error initiating test call", error, { phoneNumber: data.phoneNumber });
       throw error;
     } finally {
       setIsLoading(false);
@@ -253,7 +254,7 @@ export function useImproveScript(): UseMutationResult<
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to improve script");
         setError(error);
-        console.error("Error improving script:", error);
+        logger.error("Error improving script", error, { scriptType: data.scriptType });
         throw error;
       } finally {
         setIsLoading(false);
