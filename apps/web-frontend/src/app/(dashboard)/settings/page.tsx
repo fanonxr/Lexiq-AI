@@ -10,6 +10,8 @@ import { fetchUserProfile, updateUserProfile, terminateAccount } from "@/lib/api
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { FirmPhoneNumberSettings } from "@/components/settings/FirmPhoneNumberSettings";
+import { ThemeToggle } from "@/components/settings/ThemeToggle";
+import { logger } from "@/lib/logger";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
@@ -59,7 +61,7 @@ export default function SettingsPage() {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Failed to load profile";
         setProfileError(errorMessage);
-        console.error("Error loading profile:", error);
+        logger.error("Error loading profile", error instanceof Error ? error : new Error(String(error)));
       } finally {
         setIsLoadingProfile(false);
       }
@@ -90,7 +92,7 @@ export default function SettingsPage() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to save profile";
       setProfileError(errorMessage);
-      console.error("Error saving profile:", error);
+      logger.error("Error saving profile", error instanceof Error ? error : new Error(String(error)));
     } finally {
       setIsSavingProfile(false);
     }
@@ -124,7 +126,7 @@ export default function SettingsPage() {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     
     // Mock password change - in real implementation, this would call the API
-    console.log("Changing password");
+    logger.info("Changing password");
     
     setIsChangingPassword(false);
     setCurrentPassword("");
@@ -157,7 +159,7 @@ export default function SettingsPage() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to terminate account";
       setTerminateError(errorMessage);
-      console.error("Error terminating account:", error);
+      logger.error("Error terminating account", error instanceof Error ? error : new Error(String(error)));
     } finally {
       setIsTerminating(false);
       setShowTerminateConfirm(false);
@@ -245,6 +247,9 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Appearance Settings */}
+      <ThemeToggle />
 
       {/* Firm Phone Number */}
       <FirmPhoneNumberSettings />

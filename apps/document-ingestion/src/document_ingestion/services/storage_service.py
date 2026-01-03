@@ -49,12 +49,60 @@ class StorageService:
                 logger.info(f"Created BlobServiceClient with Managed Identity: {settings.storage.account_name}")
             elif settings.storage.connection_string:
                 # Use connection string
-                self._client = BlobServiceClient.from_connection_string(
-                    settings.storage.connection_string
+                try:
+                    # Clean connection string: remove trailing semicolons and whitespace
+                    conn_str = settings.storage.connection_string.strip().rstrip(';')
+                    
+                    # Remove quotes if present (common issue with env vars)
+                    if conn_str.startswith('"') and conn_str.endswith('"'):
+                        conn_str = conn_str[1:-1]
+                    if conn_str.startswith("'") and conn_str.endswith("'"):
+                        conn_str = conn_str[1:-1]
+                    
+                    # Validate connection string format
+                    if not conn_str or len(conn_str) < 50:
+                        raise ValueError("Connection string appears to be too short or empty")
+                    
+                    # Validate required components
+                    if "AccountName=" not in conn_str:
+                        raise ValueError("Connection string missing AccountName component")
+                    if "AccountKey=" not in conn_str and "SharedAccessSignature=" not in conn_str:
+                        raise ValueError("Connection string missing AccountKey or SharedAccessSignature")
+                    
+                    self._client = BlobServiceClient.from_connection_string(conn_str)
+                    logger.info("Created BlobServiceClient with connection string")
+                except Exception as conn_error:
+                    logger.error(f"Failed to create BlobServiceClient from connection string: {conn_error}")
+                    # Fallback to account_key if available
+                    if settings.storage.account_key and settings.storage.account_name:
+                        logger.warning("Falling back to account_key method due to connection string parsing failure")
+                        from azure.storage.blob.aio import BlobServiceClient
+                        from azure.core.credentials import AzureNamedKeyCredential
+                        account_url = f"https://{settings.storage.account_name}.blob.core.windows.net"
+                        credential = AzureNamedKeyCredential(
+                            name=settings.storage.account_name,
+                            key=settings.storage.account_key
+                        )
+                        self._client = BlobServiceClient(account_url=account_url, credential=credential)
+                        logger.info("Created BlobServiceClient using account_key fallback")
+                    else:
+                        raise StorageError(
+                            f"Connection string parsing failed and no account_key available for fallback. "
+                            f"Error: {conn_error}. "
+                            f"Please check your connection string format or provide STORAGE_ACCOUNT_NAME and STORAGE_ACCOUNT_KEY instead."
+                        ) from conn_error
+            elif settings.storage.account_key and settings.storage.account_name:
+                # Use account key directly
+                from azure.core.credentials import AzureNamedKeyCredential
+                account_url = f"https://{settings.storage.account_name}.blob.core.windows.net"
+                credential = AzureNamedKeyCredential(
+                    name=settings.storage.account_name,
+                    key=settings.storage.account_key
                 )
-                logger.info("Created BlobServiceClient with connection string")
+                self._client = BlobServiceClient(account_url=account_url, credential=credential)
+                logger.info("Created BlobServiceClient with account key")
             else:
-                raise StorageError("Storage not configured. Set STORAGE_ACCOUNT_NAME and either STORAGE_USE_MANAGED_IDENTITY or STORAGE_CONNECTION_STRING")
+                raise StorageError("Storage not configured. Set STORAGE_ACCOUNT_NAME and either STORAGE_USE_MANAGED_IDENTITY, STORAGE_CONNECTION_STRING, or STORAGE_ACCOUNT_KEY")
 
             return self._client
         except Exception as e:

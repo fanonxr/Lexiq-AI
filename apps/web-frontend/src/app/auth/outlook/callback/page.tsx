@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { handleOutlookOAuthCallback } from "@/lib/api/calendar-integrations";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 
-export default function OutlookCallbackPage() {
+function OutlookCallbackPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
@@ -97,6 +97,23 @@ export default function OutlookCallbackPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OutlookCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-900">
+        <div className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-8 shadow-lg dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex flex-col items-center justify-center space-y-4 text-center">
+            <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            <h2 className="text-xl font-semibold">Loading...</h2>
+          </div>
+        </div>
+      </div>
+    }>
+      <OutlookCallbackPageContent />
+    </Suspense>
   );
 }
 

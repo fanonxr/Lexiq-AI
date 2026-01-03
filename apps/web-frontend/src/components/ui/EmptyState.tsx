@@ -85,7 +85,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center text-center",
+        "flex w-full flex-col items-center justify-center text-center",
         sizes.container,
         className
       )}
@@ -113,7 +113,7 @@ export function EmptyState({
       {description && (
         <p
           className={cn(
-            "mb-4 max-w-md text-muted-foreground",
+            "mb-4 max-w-2xl px-4 text-muted-foreground",
             sizes.description
           )}
         >

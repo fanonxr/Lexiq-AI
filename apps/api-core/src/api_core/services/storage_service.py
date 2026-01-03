@@ -2,13 +2,18 @@
 
 import logging
 from datetime import datetime, timedelta
+import re
+import time
 from typing import List, Optional
+from urllib.parse import unquote
 
 from azure.core.exceptions import AzureError
 from azure.core.credentials import AzureNamedKeyCredential
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
+from azure.storage.blob import BlobClient
+import azure.storage.blob  # For version checking
 
 from api_core.config import get_settings
 
@@ -29,38 +34,70 @@ class StorageService:
         """Get or create BlobServiceClient (synchronous)."""
         if self._blob_service_client is None:
             # Priority: connection_string > account_key > managed_identity
-            # For local development (Azurite), connection_string is preferred
             logger.debug(
                 f"Initializing sync blob client - connection_string: {bool(self.settings.storage.connection_string)}, "
                 f"account_key: {bool(self.settings.storage.account_key)}, "
                 f"use_managed_identity: {self.settings.storage.use_managed_identity}"
             )
             if self.settings.storage.connection_string:
-                # Use connection string (preferred for local dev with Azurite)
+                # Use connection string
                 logger.info(
-                    f"Using connection string for Azure Blob Storage (Azurite/local). "
+                    f"Using connection string for Azure Blob Storage. "
                     f"Connection string length: {len(self.settings.storage.connection_string)}"
                 )
                 try:
+                    # Clean connection string: remove trailing semicolons and whitespace
+                    conn_str = self.settings.storage.connection_string.strip().rstrip(';')
+                    
+                    # Remove quotes if present (common issue with env vars)
+                    if conn_str.startswith('"') and conn_str.endswith('"'):
+                        conn_str = conn_str[1:-1]
+                    if conn_str.startswith("'") and conn_str.endswith("'"):
+                        conn_str = conn_str[1:-1]
+                    
+                    # Validate connection string format
+                    if not conn_str or len(conn_str) < 50:
+                        raise ValueError("Connection string appears to be too short or empty")
+                    
+                    # Validate required components
+                    if "AccountName=" not in conn_str:
+                        raise ValueError("Connection string missing AccountName component")
+                    if "AccountKey=" not in conn_str and "SharedAccessSignature=" not in conn_str:
+                        raise ValueError("Connection string missing AccountKey or SharedAccessSignature")
+                    
                     self._blob_service_client = BlobServiceClient.from_connection_string(
-                        self.settings.storage.connection_string
+                        conn_str
                     )
+                    logger.info("Successfully created BlobServiceClient from connection string")
                 except Exception as e:
                     logger.error(f"Failed to create BlobServiceClient from connection string: {e}")
-                    raise
+                    # Fallback to account_key method if available
+                    if self.settings.storage.account_key and self.settings.storage.account_name:
+                        logger.warning("Falling back to account_key method due to connection string parsing failure")
+                        try:
+                            account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
+                            credential = AzureNamedKeyCredential(
+                                name=self.settings.storage.account_name,
+                                key=self.settings.storage.account_key
+                            )
+                            self._blob_service_client = BlobServiceClient(
+                                account_url=account_url,
+                                credential=credential,
+                            )
+                            logger.info("Successfully created BlobServiceClient using account_key fallback")
+                        except Exception as fallback_error:
+                            logger.error(f"Fallback to account_key also failed: {fallback_error}")
+                            raise ValueError(
+                                f"Both connection string and account_key methods failed. "
+                                f"Connection string error: {e}. "
+                                f"Account key error: {fallback_error}"
+                            ) from e
+                    else:
+                        raise
             elif self.settings.storage.account_key:
                 # Use account key
                 logger.info("Using account key for Azure Blob Storage")
-                # Check if this is Azurite
-                is_azurite = (
-                    self.settings.storage.connection_string and "azurite" in self.settings.storage.connection_string.lower()
-                ) or (
-                    self.settings.storage.account_name == "devstoreaccount1"
-                )
-                if is_azurite:
-                    account_url = f"http://azurite:10000/{self.settings.storage.account_name}"
-                else:
-                    account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
+                account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
                 credential = AzureNamedKeyCredential(
                     name=self.settings.storage.account_name,
                     key=self.settings.storage.account_key
@@ -87,72 +124,223 @@ class StorageService:
     def _get_async_blob_service_client(self) -> AsyncBlobServiceClient:
         """Get or create AsyncBlobServiceClient."""
         if self._async_blob_service_client is None:
-            # Priority: account_key (for Azurite) > connection_string > managed_identity
-            # For Azurite, account_key with AzureNamedKeyCredential is more reliable
+            # Priority: connection_string > account_key > managed_identity
             logger.debug(
                 f"Initializing async blob client - connection_string: {bool(self.settings.storage.connection_string)}, "
                 f"account_key: {bool(self.settings.storage.account_key)}, "
                 f"use_managed_identity: {self.settings.storage.use_managed_identity}"
             )
             
-            # Check if this is Azurite (local dev)
-            is_azurite = (
-                self.settings.storage.connection_string and "azurite" in self.settings.storage.connection_string.lower()
-            ) or (
-                self.settings.storage.account_name == "devstoreaccount1"
-            )
-            
-            # For Azurite, connection string is most reliable (handles endpoint correctly)
-            if is_azurite and self.settings.storage.connection_string:
-                logger.info("Using connection string for Azurite (most reliable method)")
+            if self.settings.storage.connection_string:
+                # Use connection string (for Azure Storage or other scenarios)
+                # Log SDK version for debugging
                 try:
-                    # Remove any trailing semicolons that might cause issues
-                    conn_str = self.settings.storage.connection_string.rstrip(';')
-                    self._async_blob_service_client = AsyncBlobServiceClient.from_connection_string(
-                        conn_str
-                    )
-                    logger.info(f"Successfully created AsyncBlobServiceClient for Azurite using connection string")
-                except Exception as e:
-                    logger.error(f"Failed to create AsyncBlobServiceClient from connection string: {e}")
-                    # Fallback to account_key method
-                    if self.settings.storage.account_key:
-                        logger.info("Falling back to account_key method for Azurite")
-                        account_url = f"http://azurite:10000/{self.settings.storage.account_name}"
-                        credential = AzureNamedKeyCredential(
-                            name=self.settings.storage.account_name,
-                            key=self.settings.storage.account_key
-                        )
-                        self._async_blob_service_client = AsyncBlobServiceClient(
-                            account_url=account_url,
-                            credential=credential,
-                        )
-                    else:
-                        raise
-            elif self.settings.storage.connection_string:
-                # Use connection string (fallback for local dev or other scenarios)
+                    import azure.storage.blob
+                    sdk_version = azure.storage.blob.__version__
+                except Exception:
+                    sdk_version = "unknown"
+                
                 logger.info(
                     f"Using connection string for Azure Blob Storage. "
-                    f"Connection string length: {len(self.settings.storage.connection_string)}"
+                    f"Connection string length: {len(self.settings.storage.connection_string)}, "
+                    f"Azure Storage Blob SDK version: {sdk_version}"
                 )
                 try:
-                    self._async_blob_service_client = AsyncBlobServiceClient.from_connection_string(
-                        self.settings.storage.connection_string
-                    )
+                    # Clean connection string: remove trailing semicolons and whitespace
+                    conn_str = self.settings.storage.connection_string.strip().rstrip(';')
+                    
+                    # Remove quotes if present (common issue with env vars)
+                    if conn_str.startswith('"') and conn_str.endswith('"'):
+                        conn_str = conn_str[1:-1]
+                    if conn_str.startswith("'") and conn_str.endswith("'"):
+                        conn_str = conn_str[1:-1]
+                    
+                    # Validate connection string format
+                    if not conn_str or len(conn_str) < 50:
+                        raise ValueError("Connection string appears to be too short or empty")
+                    
+                    # Validate required components
+                    if "AccountName=" not in conn_str:
+                        raise ValueError("Connection string missing AccountName component")
+                    if "AccountKey=" not in conn_str and "SharedAccessSignature=" not in conn_str:
+                        raise ValueError("Connection string missing AccountKey or SharedAccessSignature")
+                    
+                    # Log connection string preview for debugging (first 80 chars, hide sensitive parts)
+                    conn_preview = conn_str[:80] + "..." if len(conn_str) > 80 else conn_str
+                    # Mask account key in preview
+                    if "AccountKey=" in conn_preview:
+                        parts = conn_preview.split("AccountKey=")
+                        if len(parts) > 1:
+                            key_part = parts[1].split(";")[0]
+                            masked_key = key_part[:4] + "..." + key_part[-4:] if len(key_part) > 8 else "***"
+                            conn_preview = parts[0] + "AccountKey=" + masked_key + (parts[1].split(";", 1)[1] if ";" in parts[1] else "")
+                    logger.debug(f"Connection string preview: {conn_preview}")
+                    
+                    # Try to extract account_name and account_key from connection string
+                    # This helps avoid connection string parsing issues in Azure SDK
+                    account_name_from_conn = None
+                    account_key_from_conn = None
+                    try:
+                        # Parse connection string more carefully
+                        # Handle cases where values might contain special characters
+                        # Match AccountName=value (value can contain anything until ; or end of string)
+                        account_name_match = re.search(r'AccountName=([^;]+)', conn_str)
+                        if account_name_match:
+                            account_name_from_conn = account_name_match.group(1).strip()
+                        
+                        # Match AccountKey=value (value can contain anything until ; or end of string)
+                        account_key_match = re.search(r'AccountKey=([^;]+)', conn_str)
+                        if account_key_match:
+                            account_key_from_conn = account_key_match.group(1).strip()
+                            # URL-decode the account key in case it was URL-encoded
+                            # This handles cases where keys contain special characters like +, /, =
+                            account_key_from_conn = unquote(account_key_from_conn)
+                        
+                        # Log extracted values with masking for debugging
+                        if account_key_from_conn:
+                            key_preview = f"{account_key_from_conn[:4]}...{account_key_from_conn[-4:]}" if len(account_key_from_conn) > 8 else "***"
+                            logger.info(
+                                f"Extracted from connection string - "
+                                f"AccountName: '{account_name_from_conn}', "
+                                f"AccountKey length: {len(account_key_from_conn)}, "
+                                f"AccountKey preview: {key_preview}"
+                            )
+                        else:
+                            logger.warning(f"Failed to extract AccountKey from connection string")
+                        
+                        # If we successfully extracted both, use account_key method instead
+                        # This is more reliable than connection string parsing
+                        if account_name_from_conn and account_key_from_conn:
+                            logger.info(f"Extracted account_name '{account_name_from_conn}' from connection string, using account_key method for better reliability")
+                            
+                            # Verify account key format (should be base64, typically 88 chars)
+                            key_length = len(account_key_from_conn)
+                            logger.debug(f"Account key length: {key_length}, starts with: {account_key_from_conn[:4]}..., ends with: ...{account_key_from_conn[-4:]}")
+                            
+                            # Check for common issues
+                            if key_length < 80 or key_length > 100:
+                                logger.warning(f"Account key length ({key_length}) seems unusual. Expected ~88 characters for base64-encoded key.")
+                            
+                            account_url = f"https://{account_name_from_conn}.blob.core.windows.net"
+                            logger.debug(f"Using account URL: {account_url}")
+                            
+                            # Check system time sync (important for Azure Storage authentication)
+                            current_time = datetime.utcnow()
+                            logger.debug(f"Current UTC time: {current_time.isoformat()}")
+                            
+                            credential = AzureNamedKeyCredential(
+                                name=account_name_from_conn,
+                                key=account_key_from_conn
+                            )
+                            # Note: API version is handled automatically by the SDK
+                            # If you see x-ms-version:2025-11-05 errors, try upgrading azure-storage-blob
+                            self._async_blob_service_client = AsyncBlobServiceClient(
+                                account_url=account_url,
+                                credential=credential,
+                            )
+                            # Log SDK version for debugging
+                            try:
+                                import azure.storage.blob
+                                sdk_version = azure.storage.blob.__version__
+                                logger.info(f"Azure Storage Blob SDK version: {sdk_version}")
+                            except Exception:
+                                pass
+                            logger.info(f"Successfully created AsyncBlobServiceClient using extracted account_name '{account_name_from_conn}' and account_key")
+                        else:
+                            # Fallback to connection string method
+                            logger.warning("Could not extract account_name/key from connection string, using connection string method")
+                            self._async_blob_service_client = AsyncBlobServiceClient.from_connection_string(
+                                conn_str
+                            )
+                            logger.info("Successfully created AsyncBlobServiceClient from connection string")
+                    except Exception as parse_error:
+                        logger.warning(f"Error extracting account details from connection string: {parse_error}, trying connection string method")
+                        self._async_blob_service_client = AsyncBlobServiceClient.from_connection_string(
+                            conn_str
+                        )
+                        logger.info("Successfully created AsyncBlobServiceClient from connection string")
                 except Exception as e:
                     logger.error(f"Failed to create AsyncBlobServiceClient from connection string: {e}")
-                    raise
+                    logger.error(f"Connection string format check - contains 'AccountName': {'AccountName=' in conn_str if 'conn_str' in locals() else 'N/A'}")
+                    logger.error(f"Connection string format check - contains 'AccountKey': {'AccountKey=' in conn_str if 'conn_str' in locals() else 'N/A'}")
+                    
+                    # Fallback to account_key method if available
+                    if self.settings.storage.account_key and self.settings.storage.account_name:
+                        logger.warning("Falling back to account_key method due to connection string parsing failure")
+                        try:
+                            account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
+                            credential = AzureNamedKeyCredential(
+                                name=self.settings.storage.account_name,
+                                key=self.settings.storage.account_key
+                            )
+                            self._async_blob_service_client = AsyncBlobServiceClient(
+                                account_url=account_url,
+                                credential=credential,
+                            )
+                            logger.info("Successfully created AsyncBlobServiceClient using account_key fallback")
+                        except Exception as fallback_error:
+                            logger.error(f"Fallback to account_key also failed: {fallback_error}")
+                            raise ValueError(
+                                f"Both connection string and account_key methods failed. "
+                                f"Connection string error: {e}. "
+                                f"Account key error: {fallback_error}"
+                            ) from e
+                    else:
+                        raise ValueError(
+                            f"Connection string parsing failed and no account_key available for fallback. "
+                            f"Error: {e}. "
+                            f"Please check your connection string format or provide STORAGE_ACCOUNT_NAME and STORAGE_ACCOUNT_KEY instead."
+                        ) from e
             elif self.settings.storage.account_key:
                 # Use account key for real Azure Storage
-                logger.info("Using account key for Azure Blob Storage")
+                logger.info(f"Using account key for Azure Blob Storage (account: {self.settings.storage.account_name})")
+                
+                # URL-decode the account key in case it was URL-encoded in environment variable
+                # This handles cases where keys contain special characters like +, /, =
+                # See: https://learn.microsoft.com/en-us/answers/questions/1636967/how-to-fix-mac-signature-found-in-the-http-request
+                account_key = unquote(self.settings.storage.account_key)
+                
+                # Verify account key format (should be base64, typically 88 chars)
+                key_length = len(account_key)
+                logger.debug(f"Account key length: {key_length}, starts with: {account_key[:4]}..., ends with: ...{account_key[-4:]}")
+                
+                # Check for common issues
+                if key_length < 80 or key_length > 100:
+                    logger.warning(f"Account key length ({key_length}) seems unusual. Expected ~88 characters for base64-encoded key.")
+                
                 account_url = f"https://{self.settings.storage.account_name}.blob.core.windows.net"
+                logger.debug(f"Using account URL: {account_url}")
+                
+                # Check system time sync (important for Azure Storage authentication)
+                # Time skew can cause authentication failures - Azure requires time to be within 15 minutes
+                current_time = datetime.utcnow()
+                logger.debug(f"Current UTC time: {current_time.isoformat()}")
+                
+                # Log time sync warning (Azure Storage requires time to be within 15 minutes of server time)
+                # Note: Docker containers inherit host time, but if host is out of sync, auth will fail
+                logger.debug(
+                    "Note: Azure Storage authentication requires system clock to be within 15 minutes of Azure server time. "
+                    "If authentication fails, check Docker container clock sync."
+                )
+                
                 credential = AzureNamedKeyCredential(
                     name=self.settings.storage.account_name,
-                    key=self.settings.storage.account_key
+                    key=account_key
                 )
+                # Create client - API version is set automatically by SDK
+                # If you see x-ms-version:2025-11-05, it's a bug in the SDK version
                 self._async_blob_service_client = AsyncBlobServiceClient(
                     account_url=account_url,
                     credential=credential,
                 )
+                # Log SDK version for debugging
+                try:
+                    import azure.storage.blob
+                    sdk_version = azure.storage.blob.__version__
+                    logger.info(f"Azure Storage Blob SDK version: {sdk_version}")
+                except Exception:
+                    pass
+                logger.info(f"Successfully created AsyncBlobServiceClient for account '{self.settings.storage.account_name}'")
             elif self.settings.storage.use_managed_identity:
                 # Use Managed Identity (for production Azure deployments)
                 logger.info("Using Managed Identity for Azure Blob Storage")
@@ -164,7 +352,7 @@ class StorageService:
             else:
                 raise ValueError(
                     "Storage credentials not configured. Set STORAGE_ACCOUNT_NAME and "
-                    "either STORAGE_CONNECTION_STRING (for local/Azurite) or STORAGE_USE_MANAGED_IDENTITY=true (for Azure)"
+                    "either STORAGE_CONNECTION_STRING or STORAGE_USE_MANAGED_IDENTITY=true"
                 )
         return self._async_blob_service_client
 
@@ -179,6 +367,14 @@ class StorageService:
         """
         try:
             client = self._get_async_blob_service_client()
+            
+            # Log the account URL for debugging
+            try:
+                account_url = client.account_name
+                logger.debug(f"Using storage account: {account_url}")
+            except Exception:
+                pass
+            
             container_client = client.get_container_client(container_name)
 
             # Check if container exists
@@ -189,9 +385,36 @@ class StorageService:
                 logger.info(f"Created storage container: {container_name}")
             else:
                 logger.debug(f"Container already exists: {container_name}")
-        except AzureError as e:
+        except Exception as e:
+            error_msg = str(e)
+            # Check for the specific connection string parsing error
+            if "defaultendpointsprotocol" in error_msg.lower() or "name or service not known" in error_msg.lower():
+                logger.error(
+                    f"Connection string parsing issue detected. "
+                    f"Error: {error_msg}. "
+                    f"This usually means the connection string format is incorrect or the Azure SDK is misparsing it. "
+                    f"Try using STORAGE_ACCOUNT_NAME and STORAGE_ACCOUNT_KEY instead of STORAGE_CONNECTION_STRING."
+                )
+                # Try to recreate client using account_key if available
+                if self.settings.storage.account_key and self.settings.storage.account_name:
+                    logger.warning("Attempting to recreate client using account_key method")
+                    # Reset the client to force recreation
+                    self._async_blob_service_client = None
+                    try:
+                        client = self._get_async_blob_service_client()
+                        container_client = client.get_container_client(container_name)
+                        exists = await container_client.exists()
+                        if not exists:
+                            await container_client.create_container()
+                            logger.info(f"Created storage container: {container_name} (using account_key method)")
+                        else:
+                            logger.debug(f"Container already exists: {container_name} (using account_key method)")
+                        return
+                    except Exception as retry_error:
+                        logger.error(f"Retry with account_key method also failed: {retry_error}")
+                        raise AzureError(f"Failed to ensure container exists: {container_name}. Original error: {error_msg}. Retry error: {retry_error}") from e
             logger.error(f"Failed to ensure container exists: {container_name}: {e}")
-            raise
+            raise AzureError(f"Failed to ensure container exists: {container_name}: {e}") from e
 
     async def upload_file(
         self,
@@ -220,8 +443,25 @@ class StorageService:
 
             # Upload file
             client = self._get_async_blob_service_client()
-            blob_client = client.get_blob_client(container=container_name, blob=blob_name)
-
+            
+            # Log account info for debugging
+            try:
+                account_name = client.account_name
+                logger.debug(f"Uploading to storage account: {account_name}")
+            except Exception:
+                pass
+            
+            # Azure SDK handles blob name encoding automatically, but we should ensure
+            # the blob name doesn't have leading/trailing slashes or invalid characters
+            # The SDK will properly encode special characters in the blob path
+            blob_name_clean = blob_name.strip('/')  # Remove leading/trailing slashes
+            
+            logger.debug(f"Uploading blob: container={container_name}, blob={blob_name_clean}, size: {len(file_data)} bytes")
+            
+            blob_client = client.get_blob_client(container=container_name, blob=blob_name_clean)
+            
+            # Upload blob - Azure SDK handles API version and blob name encoding automatically
+            # Note: If you see x-ms-version:2025-11-05 errors, the SDK might need upgrading
             await blob_client.upload_blob(
                 data=file_data,
                 content_type=content_type,
@@ -229,10 +469,26 @@ class StorageService:
             )
 
             blob_url = blob_client.url
-            logger.info(f"Uploaded file to blob storage: {blob_url}")
+            logger.info(f"✅ Successfully uploaded blob to: {blob_url}")
             return blob_url
 
         except AzureError as e:
+            error_msg = str(e)
+            # Check for authentication errors
+            if "authentication" in error_msg.lower() or "authorization" in error_msg.lower():
+                logger.error(
+                    f"Authentication failed when uploading file. "
+                    f"This usually means the account key is incorrect or the connection string was not parsed correctly. "
+                    f"Error: {error_msg}. "
+                    f"Please verify STORAGE_ACCOUNT_NAME and STORAGE_ACCOUNT_KEY are correct, "
+                    f"or check that the connection string was parsed correctly."
+                )
+                # Log what we're actually using
+                try:
+                    client = self._get_async_blob_service_client()
+                    logger.debug(f"Current storage account: {client.account_name if hasattr(client, 'account_name') else 'unknown'}")
+                except Exception:
+                    pass
             logger.error(f"Failed to upload file to blob storage: {e}")
             raise
 

@@ -6,6 +6,7 @@
  */
 
 import { getEnv } from "@/lib/config/browser/env";
+import { logger } from "@/lib/logger";
 
 export class ApiClientError extends Error {
   status?: number;
@@ -75,31 +76,23 @@ export async function getAuthTokenAsync(): Promise<string | null> {
   // Try MSAL token getter first (if set by AuthProvider)
   if (globalTokenGetter) {
     try {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[API Client] Calling globalTokenGetter...");
-      }
+      logger.debug("Calling globalTokenGetter...");
       const token = await globalTokenGetter();
       if (token) {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[API Client] Token retrieved from globalTokenGetter:", {
-            hasToken: !!token,
-            tokenLength: token.length,
-          });
-        }
+        logger.debug("Token retrieved from globalTokenGetter", {
+          hasToken: !!token,
+          tokenLength: token.length,
+        });
         return token;
       } else {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[API Client] globalTokenGetter returned null/undefined");
-        }
+        logger.warn("globalTokenGetter returned null/undefined");
       }
     } catch (error) {
-      console.error("[API Client] Failed to get token from MSAL:", error);
+      logger.error("Failed to get token from MSAL", error instanceof Error ? error : new Error(String(error)));
       // Fall through to sessionStorage
     }
   } else {
-    if (process.env.NODE_ENV === "development") {
-      console.warn("[API Client] No globalTokenGetter set, trying MSAL instance directly...");
-    }
+    logger.debug("No globalTokenGetter set, trying MSAL instance directly...");
     
     // Fallback: Try to get token directly from MSAL instance if available
     try {
@@ -110,9 +103,7 @@ export async function getAuthTokenAsync(): Promise<string | null> {
       
       if (accounts.length > 0) {
         const account = accounts[0];
-        if (process.env.NODE_ENV === "development") {
-          console.log("[API Client] Found account in MSAL instance, attempting token acquisition...");
-        }
+        logger.debug("Found account in MSAL instance, attempting token acquisition...");
         
         try {
           const request = tokenRequest();
@@ -122,18 +113,14 @@ export async function getAuthTokenAsync(): Promise<string | null> {
           });
           
           if (result?.accessToken) {
-            if (process.env.NODE_ENV === "development") {
-              console.log("[API Client] Token acquired directly from MSAL instance");
-            }
+            logger.debug("Token acquired directly from MSAL instance");
             return result.accessToken;
           }
         } catch (silentError: any) {
-          if (process.env.NODE_ENV === "development") {
-            console.warn("[API Client] Silent token acquisition failed, trying interactive:", {
-              errorCode: silentError?.errorCode,
-              errorMessage: silentError?.message,
-            });
-          }
+          logger.warn("Silent token acquisition failed, trying interactive", {
+            errorCode: silentError?.errorCode,
+            errorMessage: silentError?.message,
+          });
           
           // Try interactive popup as last resort (but this will show a popup)
           try {
@@ -144,35 +131,29 @@ export async function getAuthTokenAsync(): Promise<string | null> {
             });
             
             if (result?.accessToken) {
-              if (process.env.NODE_ENV === "development") {
-                console.log("[API Client] Token acquired via interactive popup");
-              }
+              logger.debug("Token acquired via interactive popup");
               return result.accessToken;
             }
           } catch (popupError) {
-            console.error("[API Client] Interactive token acquisition also failed:", popupError);
+            logger.error("Interactive token acquisition also failed", popupError instanceof Error ? popupError : new Error(String(popupError)));
           }
         }
       } else {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[API Client] No accounts found in MSAL instance");
-        }
+        logger.debug("No accounts found in MSAL instance");
       }
     } catch (msalError) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[API Client] Could not access MSAL instance:", msalError);
-      }
+      logger.warn("Could not access MSAL instance", {
+        error: msalError instanceof Error ? msalError.message : String(msalError),
+      });
     }
   }
 
   // Fall back to sessionStorage (for backward compatibility)
   const sessionToken = sessionStorage.getItem("auth_token");
-  if (process.env.NODE_ENV === "development") {
-    console.log("[API Client] SessionStorage token:", {
-      hasToken: !!sessionToken,
-      tokenLength: sessionToken?.length || 0,
-    });
-  }
+  logger.debug("SessionStorage token", {
+    hasToken: !!sessionToken,
+    tokenLength: sessionToken?.length || 0,
+  });
   return sessionToken;
 }
 
@@ -257,124 +238,127 @@ export async function apiRequest<T = unknown>(
   endpoint: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  console.log("[API Client] apiRequest called:", {
+  logger.debug("apiRequest called", {
     endpoint,
-    options: { ...options, body: options.body ? "[body present]" : undefined },
+    method: options.method || "GET",
+    requireAuth: options.requireAuth !== false,
   });
   
   const { requireAuth = true, headers = {}, ...fetchOptions } = options;
-  
-  console.log("[API Client] requireAuth:", requireAuth);
 
   // Build URL
   const baseUrl = getApiUrl();
   const url = endpoint.startsWith("http") ? endpoint : `${baseUrl}${endpoint}`;
-  
-  console.log("[API Client] Request URL:", url);
 
   // Build headers
   const requestHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     ...(headers as Record<string, string>),
   };
-  
-  console.log("[API Client] Initial headers:", Object.keys(requestHeaders));
 
   // Add authentication token if required
-  console.log("[API Client] Checking requireAuth:", requireAuth);
   if (requireAuth) {
-    console.log("[API Client] requireAuth is true, entering token retrieval block");
-    if (process.env.NODE_ENV === "development") {
-      console.log("[API Client] Getting token for authenticated request:", {
-        endpoint,
-        hasGlobalTokenGetter: !!globalTokenGetter,
-        method: fetchOptions.method || "GET",
-      });
-    }
+    logger.debug("Getting token for authenticated request", {
+      endpoint,
+      hasGlobalTokenGetter: !!globalTokenGetter,
+      method: fetchOptions.method || "GET",
+    });
     
     let token: string | null = null;
+    let tokenError: Error | null = null;
+    
     try {
-      token = await getAuthTokenAsync();
-    } catch (tokenError) {
-      console.error("[API Client] Error getting token:", tokenError);
-      token = null;
+      // Retry token acquisition up to 3 times with exponential backoff
+      let retries = 0;
+      const maxRetries = 3;
+      
+      while (retries < maxRetries && !token) {
+        try {
+          token = await getAuthTokenAsync();
+          if (token) {
+            break;
+          }
+          
+          // If token is null and we have a token getter, wait a bit and retry
+          if (globalTokenGetter && retries < maxRetries - 1) {
+            const delay = Math.min(1000 * Math.pow(2, retries), 2000); // Max 2 seconds
+            logger.debug(`Token is null, retrying in ${delay}ms`, {
+              attempt: retries + 1,
+              maxRetries,
+            });
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        } catch (err) {
+          tokenError = err instanceof Error ? err : new Error(String(err));
+          if (retries < maxRetries - 1) {
+            const delay = Math.min(1000 * Math.pow(2, retries), 2000);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
+        retries++;
+      }
+    } catch (error) {
+      tokenError = error instanceof Error ? error : new Error(String(error));
+      logger.error("Error getting token", tokenError);
     }
     
     if (token) {
       requestHeaders["Authorization"] = `Bearer ${token}`;
-      console.log("[API Client] Token attached to request:", {
-        token,
-        requestHeaders,
+      logger.debug("Token attached to request", {
+        endpoint,
+        hasToken: !!token,
+        tokenLength: token.length,
       });
-      if (process.env.NODE_ENV === "development") {
-        console.log("[API Client] ✅ Token attached to request:", {
-          endpoint,
-          hasToken: !!token,
-          tokenLength: token.length,
-          tokenPreview: token.substring(0, 20) + "...",
-          headerSet: !!requestHeaders["Authorization"],
-          headerValue: requestHeaders["Authorization"].substring(0, 30) + "...",
-        });
-      }
     } else {
-      console.error("[API Client] ❌ No token available for authenticated request:", {
+      logger.error("No token available for authenticated request", undefined, {
         endpoint,
         hasGlobalTokenGetter: !!globalTokenGetter,
         sessionStorageToken: typeof window !== "undefined" ? !!sessionStorage.getItem("auth_token") : "N/A (SSR)",
         method: fetchOptions.method || "GET",
+        tokenError: tokenError?.message,
       });
       
       // Try to get more info about why token is null
       if (globalTokenGetter) {
         try {
-          console.log("[API Client] Attempting to call token getter directly for debugging...");
+          logger.debug("Attempting to call token getter directly for debugging...");
           const directToken = await globalTokenGetter();
-          console.log("[API Client] Direct token getter result:", {
+          logger.debug("Direct token getter result", {
             hasToken: !!directToken,
             tokenLength: directToken?.length || 0,
           });
         } catch (directError) {
-          console.error("[API Client] Direct token getter error:", directError);
+          logger.error("Direct token getter error", directError instanceof Error ? directError : new Error(String(directError)));
         }
       }
       
       // Don't fail silently - this will cause 401 errors which is expected
       // The backend will return proper error messages
     }
-  } else {
-    console.log("[API Client] requireAuth is false, skipping token retrieval");
   }
 
-  console.log("[API Client] Final headers before request:", {
-    ...requestHeaders,
-    Authorization: requestHeaders["Authorization"] ? `${requestHeaders["Authorization"].substring(0, 30)}...` : "none",
+  logger.debug("Final headers before request", {
+    hasAuth: !!requestHeaders["Authorization"],
+    method: fetchOptions.method || "GET",
   });
 
   try {
-    if (process.env.NODE_ENV === "development") {
-      console.log("[API Client] Making request:", {
-        method: fetchOptions.method || "GET",
-        url,
-        hasAuth: !!requestHeaders["Authorization"],
-        authHeaderPreview: requestHeaders["Authorization"]
-          ? `${requestHeaders["Authorization"].substring(0, 20)}...`
-          : "none",
-      });
-    }
+    logger.debug("Making request", {
+      method: fetchOptions.method || "GET",
+      url,
+      hasAuth: !!requestHeaders["Authorization"],
+    });
 
     const response = await fetch(url, {
       ...fetchOptions,
       headers: requestHeaders,
     });
 
-    if (process.env.NODE_ENV === "development") {
-      console.log("[API Client] Response received:", {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-        headers: Object.fromEntries(response.headers.entries()),
-      });
-    }
+    logger.debug("Response received", {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+    });
 
     // Parse response
     let data: any;
@@ -395,17 +379,14 @@ export async function apiRequest<T = unknown>(
       const errorCode = data?.code || data?.error?.code;
       const errors = data?.errors || data?.error?.details;
 
-      // Log detailed error in development
-      if (process.env.NODE_ENV === "development") {
-        console.error("[API Client] Request failed:", {
-          url,
-          status: response.status,
-          statusText: response.statusText,
-          error: errorMessage,
-          code: errorCode,
-          data: data,
-        });
-      }
+      // Log detailed error
+      logger.error("Request failed", undefined, {
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        error: errorMessage,
+        code: errorCode,
+      });
 
       throw new ApiClientError(errorMessage, response.status, errorCode, errors);
     }

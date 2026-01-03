@@ -277,9 +277,14 @@ class AzureADB2CClient:
                 if not audience_valid:
                     logger.warning(
                         f"Token audience '{token_audience}' doesn't match expected formats. "
-                        f"Expected: '{expected_audience_client_id}' or '{expected_audience_api}'"
+                        f"Expected: '{expected_audience_client_id}' or '{expected_audience_api}'. "
+                        f"Backend client_id: '{self.config.client_id}', tenant_id: '{self.config.tenant_id}'"
                     )
-                    raise AuthenticationError(f"Invalid token audience: {token_audience}")
+                    raise AuthenticationError(
+                        f"Invalid token audience: {token_audience}. "
+                        f"Expected: '{expected_audience_client_id}' or '{expected_audience_api}'. "
+                        f"Check that AZURE_AD_B2C_CLIENT_ID matches your frontend client ID."
+                    )
                 
                 # Now decode with full verification (except issuer, which we validated manually)
                 # Use the actual token audience for validation

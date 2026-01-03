@@ -14,7 +14,10 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "@/contexts/ThemeContext";
+import { logger } from "@/lib/logger";
 import { Button } from "@/components/ui/button";
+import { Moon, Sun, Monitor } from "lucide-react";
 import { clsx } from "clsx";
 
 export interface UserMenuProps {
@@ -31,6 +34,7 @@ export function UserMenu({ trigger }: UserMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { user, logout, isAuthenticated } = useAuth();
+  const { theme, setTheme } = useTheme();
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -73,7 +77,7 @@ export function UserMenu({ trigger }: UserMenuProps) {
       await logout();
       setIsOpen(false);
     } catch (error) {
-      console.error("Logout failed:", error);
+      logger.error("Logout failed", error instanceof Error ? error : new Error(String(error)));
     }
   };
 
@@ -146,6 +150,38 @@ export function UserMenu({ trigger }: UserMenuProps) {
             >
               Settings
             </Link>
+          </div>
+
+          {/* Theme Toggle */}
+          <div className="border-t border-zinc-200 py-1 dark:border-zinc-800">
+            <div className="px-4 py-2">
+              <div className="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                Theme
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextTheme = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+                    setTheme(nextTheme);
+                  }}
+                  className="flex flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  role="menuitem"
+                  title={`Current: ${theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"}. Click to cycle.`}
+                >
+                  {theme === "light" ? (
+                    <Sun className="h-4 w-4" />
+                  ) : theme === "dark" ? (
+                    <Moon className="h-4 w-4" />
+                  ) : (
+                    <Monitor className="h-4 w-4" />
+                  )}
+                  <span className="flex-1 text-left">
+                    {theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"}
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="border-t border-zinc-200 py-1 dark:border-zinc-800">

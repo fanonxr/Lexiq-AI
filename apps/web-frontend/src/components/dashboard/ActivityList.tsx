@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
  *       icon: <User className="h-4 w-4" />,
  *       text: "New Client Intake: John Doe",
  *       timestamp: new Date(),
- *       onClick: () => console.log("Clicked")
+ *       onClick: () => logger.debug("Clicked", { id: "1" })
  *     }
  *   ]}
  * />

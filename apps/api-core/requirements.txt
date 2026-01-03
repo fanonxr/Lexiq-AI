@@ -20,7 +20,7 @@ bcrypt==4.3.0  # Pin to 4.3.0 to avoid compatibility issues with bcrypt 5.0.0
 httpx==0.25.2
 msal==1.28.0  # Microsoft Authentication Library for Outlook calendar OAuth
 email-validator==2.1.0
-azure-storage-blob==12.19.0  # Azure Blob Storage SDK for file uploads
+azure-storage-blob>=12.20.0,<13.0.0  # Azure Blob Storage SDK - upgraded to fix API version bug (x-ms-version:2025-11-05)
 aiohttp==3.9.1  # Required for async Azure Blob Storage client
 python-multipart==0.0.6  # Required for FastAPI file uploads
 aio-pika==9.2.1  # RabbitMQ publishing (document ingestion jobs)

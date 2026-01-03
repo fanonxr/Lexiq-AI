@@ -15,10 +15,10 @@ import { cn } from "@/lib/utils";
  * @example
  * ```tsx
  * <ActionToolbar
- *   onCall={() => console.log("Call clicked")}
- *   onMail={() => console.log("Mail clicked")}
- *   onArchive={() => console.log("Archive clicked")}
- *   onExport={() => console.log("Export clicked")}
+ *   onCall={() => logger.debug("Call clicked", { callId: "1" })}
+ *   onMail={() => logger.debug("Mail clicked", { callId: "1" })}
+ *   onArchive={() => logger.debug("Archive clicked", { callId: "1" })}
+ *   onExport={() => logger.debug("Export clicked", { callId: "1" })}
  * />
  * ```
  */

@@ -19,6 +19,7 @@ import {
 import { useAuthContext } from "@/contexts/AuthContext";
 import { fetchUserProfile } from "@/lib/api/users";
 import { useRouter } from "next/navigation";
+import { logger } from "@/lib/logger";
 
 export function PhoneNumberWidget() {
   const { user } = useAuthContext();
@@ -38,7 +39,7 @@ export function PhoneNumberWidget() {
         const profile = await fetchUserProfile();
         setUserProfile(profile);
       } catch (err) {
-        console.error("[PhoneNumberWidget] Error fetching user profile:", err);
+        logger.error("Error fetching user profile", err instanceof Error ? err : new Error(String(err)));
         setUserProfile(user);
       } finally {
         setIsLoadingProfile(false);
@@ -100,12 +101,14 @@ export function PhoneNumberWidget() {
         const updatedProfile = await fetchUserProfile();
         setUserProfile(updatedProfile);
       } catch (err) {
-        console.error("Error refreshing user profile:", err);
+        logger.error("Error refreshing user profile", err instanceof Error ? err : new Error(String(err)));
       }
     } catch (err: any) {
       const errorMessage = err.message || "Failed to provision phone number";
       setError(errorMessage);
-      console.error("Error provisioning phone number:", err);
+      logger.error("Error provisioning phone number", err instanceof Error ? err : new Error(String(err)), {
+        effectiveFirmId,
+      });
     } finally {
       setIsProvisioning(false);
     }

@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FileText } from "lucide-react";
 import { useFiles, useUploadFile, useDeleteFile, useReindexFile, useQueryKnowledgeBase } from "@/hooks/useKnowledgeBase";
+import { logger } from "@/lib/logger";
 
 // Force dynamic rendering because layout uses client components
 export const dynamic = "force-dynamic";
@@ -47,12 +48,12 @@ export default function KnowledgeBasePage() {
       try {
         await uploadFile(file, (progress) => {
           // Progress callback - can be used for UI updates if needed
-          console.log(`Upload progress for ${file.name}: ${progress}%`);
+          logger.debug("Upload progress", { fileName: file.name, progress });
         });
         // Refresh file list after successful upload
         await refetchFiles();
       } catch (error) {
-        console.error(`Failed to upload ${file.name}:`, error);
+        logger.error("Failed to upload file", error instanceof Error ? error : new Error(String(error)), { fileName: file.name });
         // Error is handled by the hook, but we could show a toast here
       }
     }
@@ -67,7 +68,7 @@ export default function KnowledgeBasePage() {
       // Refresh file list after successful deletion
       await refetchFiles();
     } catch (error) {
-      console.error(`Failed to delete file ${fileId}:`, error);
+      logger.error("Failed to delete file", error instanceof Error ? error : new Error(String(error)), { fileId });
       // Error is handled by the hook
     }
   }, [deleteFile, refetchFiles]);
@@ -81,7 +82,7 @@ export default function KnowledgeBasePage() {
       // Refresh file list after successful re-indexing
       await refetchFiles();
     } catch (error) {
-      console.error(`Failed to re-index file ${fileId}:`, error);
+      logger.error("Failed to re-index file", error instanceof Error ? error : new Error(String(error)), { fileId });
       // Error is handled by the hook
     }
   }, [reindexFile, refetchFiles]);
@@ -111,7 +112,7 @@ export default function KnowledgeBasePage() {
         
         setMessages((prev) => [...prev, assistantMessage]);
       } catch (error) {
-        console.error("Failed to query knowledge base:", error);
+        logger.error("Failed to query knowledge base", error instanceof Error ? error : new Error(String(error)), { query: message });
         // Add error message
         const errorMessage: ChatMessage = {
           role: "assistant",

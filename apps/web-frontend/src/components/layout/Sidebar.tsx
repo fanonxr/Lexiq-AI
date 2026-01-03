@@ -129,7 +129,7 @@ export function Sidebar({
       {/* Sidebar */}
       <aside
         className={clsx(
-          "fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-zinc-200 bg-white transition-all duration-300 dark:border-zinc-800 dark:bg-zinc-900 md:relative md:z-auto",
+          "fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-zinc-200 bg-white text-zinc-900 transition-all duration-300 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 md:relative md:h-full md:z-auto",
           // Mobile: slide in/out
           isMobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           // Desktop: width based on collapsed state

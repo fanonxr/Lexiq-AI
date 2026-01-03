@@ -10,9 +10,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       POSTGRES_DB: ${POSTGRES_DB:-lexiqai_local}
+      TZ: UTC  # Set timezone explicitly
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - /etc/localtime:/etc/localtime:ro  # Sync with host time
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-lexiqai_local}"]
       interval: 10s
@@ -29,6 +31,8 @@ services:
     ports:
       - "6379:6379"
       - "6380:6380"  # SSL port (for compatibility)
+    environment:
+      TZ: UTC  # Set timezone explicitly
     command: >
       sh -c "
       if [ -n \"$$REDIS_PASSWORD\" ]; then
@@ -39,6 +43,7 @@ services:
       "
     volumes:
       - redis_data:/data
+      - /etc/localtime:/etc/localtime:ro  # Sync with host time
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -55,10 +60,12 @@ services:
     ports:
       - "6333:6333"  # REST API
       - "6334:6334"  # gRPC
-    volumes:
-      - qdrant_data:/qdrant/storage
     environment:
       QDRANT__SERVICE__GRPC_PORT: 6334
+      TZ: UTC  # Set timezone explicitly
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - /etc/localtime:/etc/localtime:ro  # Sync with host time
     healthcheck:
       # Qdrant container is minimal and doesn't have common tools (wget, curl, ps, python)
       # Since we can verify it's working via HTTP from the host, we'll use a simple check
@@ -69,20 +76,6 @@ services:
       timeout: 5s
       retries: 1
       start_period: 5s
-    networks:
-      - lexiqai-network
-
-  # Azurite (Azure Storage emulator) for local development
-  # Used by api-core (uploads) and document-ingestion (downloads)
-  azurite:
-    image: mcr.microsoft.com/azure-storage/azurite:latest
-    container_name: lexiqai-azurite-local
-    ports:
-      - "10000:10000"  # Blob service
-    command: >
-      azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --location /data
-    volumes:
-      - azurite_data:/data
     networks:
       - lexiqai-network
 
@@ -102,13 +95,13 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      azurite:
-        condition: service_started
     volumes:
       - ./apps/api-core/src:/app/src:ro  # Read-only for production-like behavior
+      - /etc/localtime:/etc/localtime:ro  # Sync with host time
     # Load environment variables from apps/api-core/.env
     # Each app in the monorepo has its own .env file
     environment:
+      - TZ=UTC  # Set timezone explicitly
       - APP_NAME=api-core
       - APP_ENV=development
       - DEBUG=true
@@ -120,11 +113,15 @@ services:
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/
       - RABBITMQ_EXCHANGE_NAME=document-ingestion-exchange
       - RABBITMQ_ROUTING_KEY=document.ingestion
-      # Azure Blob Storage (Azurite for local dev)
-      - STORAGE_ACCOUNT_NAME=devstoreaccount1
-      - STORAGE_ACCOUNT_KEY=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
-      - STORAGE_USE_MANAGED_IDENTITY=false
-      - STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1
+      # Azure Blob Storage (using actual Azure Storage Account)
+      # Set these environment variables in your .env file or docker-compose.override.yml
+      # Option 1: Use connection string (recommended for local dev)
+      - STORAGE_ACCOUNT_NAME=${STORAGE_ACCOUNT_NAME:-}
+      - STORAGE_CONNECTION_STRING=${STORAGE_CONNECTION_STRING:-}
+      # Option 2: Use account key (alternative)
+      - STORAGE_ACCOUNT_KEY=${STORAGE_ACCOUNT_KEY:-}
+      # Option 3: Use Managed Identity (for Azure-hosted services)
+      - STORAGE_USE_MANAGED_IDENTITY=${STORAGE_USE_MANAGED_IDENTITY:-false}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-lexiqai_local}
       - REDIS_URL=redis://redis:6379/0
       - CORS_ORIGINS=http://localhost:3000,http://localhost:3001
@@ -174,7 +171,9 @@ services:
         condition: service_started  # Use started instead of healthy since Qdrant health check is unreliable
     volumes:
       - ./apps/cognitive-orch/src:/app/src:ro  # Read-only for production-like behavior
+      - /etc/localtime:/etc/localtime:ro  # Sync with host time
     environment:
+      - TZ=UTC  # Set timezone explicitly
       - APP_NAME=cognitive-orch
       - ENVIRONMENT=development
       - DEBUG=true
@@ -229,8 +228,10 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+      TZ: UTC  # Set timezone explicitly
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - /etc/localtime:/etc/localtime:ro  # Sync with host time
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -255,15 +256,15 @@ services:
         condition: service_started
       api-core:
         condition: service_started
-      azurite:
-        condition: service_started
     # Add restart policy to handle connection issues
     restart: unless-stopped
     volumes:
       - ./apps/document-ingestion/src:/app/src:ro
       # Mount .env so pydantic-settings can load it (compose env_file is stricter than python-dotenv)
       - ./apps/document-ingestion/.env:/app/.env:ro
+      - /etc/localtime:/etc/localtime:ro  # Sync with host time
     environment:
+      - TZ=UTC  # Set timezone explicitly
       - APP_NAME=document-ingestion
       - ENVIRONMENT=development
       - DEBUG=true
@@ -279,10 +280,15 @@ services:
       - RABBITMQ_ROUTING_KEY=document.ingestion
       - RABBITMQ_PREFETCH_COUNT=10
       - RABBITMQ_QUEUE_DURABLE=true
-      # Azure Blob Storage (using Azurite for local dev)
-      - STORAGE_ACCOUNT_NAME=devstoreaccount1
-      - STORAGE_USE_MANAGED_IDENTITY=false
-      - STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1
+      # Azure Blob Storage (using actual Azure Storage Account)
+      # Set these environment variables in your .env file or docker-compose.override.yml
+      # Option 1: Use connection string (recommended for local dev)
+      - STORAGE_ACCOUNT_NAME=${STORAGE_ACCOUNT_NAME:-}
+      - STORAGE_CONNECTION_STRING=${STORAGE_CONNECTION_STRING:-}
+      # Option 2: Use account key (alternative)
+      - STORAGE_ACCOUNT_KEY=${STORAGE_ACCOUNT_KEY:-}
+      # Option 3: Use Managed Identity (for Azure-hosted services)
+      - STORAGE_USE_MANAGED_IDENTITY=${STORAGE_USE_MANAGED_IDENTITY:-false}
       # Embeddings config is loaded from ./apps/document-ingestion/.env via env_file
       # Qdrant Configuration
       - QDRANT_URL=http://qdrant:6333
@@ -331,7 +337,9 @@ services:
     volumes:
       # Mount source for development (optional - comment out for production)
       - ./apps/voice-gateway:/app/src:ro
+      - /etc/localtime:/etc/localtime:ro  # Sync with host time
     environment:
+      - TZ=UTC  # Set timezone explicitly
       # Server Configuration
       - PORT=8080
       # Deepgram STT Configuration
@@ -378,8 +386,6 @@ volumes:
   qdrant_data:
     driver: local
   rabbitmq_data:
-    driver: local
-  azurite_data:
     driver: local
 
 networks:
