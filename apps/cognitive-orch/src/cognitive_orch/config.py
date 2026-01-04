@@ -177,6 +177,32 @@ class IntegrationSettings(BaseSettings):
     )
 
 
+class DatabaseSettings(BaseSettings):
+    """Database configuration for client memory storage."""
+
+    model_config = SettingsConfigDict(env_prefix="DATABASE_", case_sensitive=False)
+
+    url: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@localhost:5432/lexiq",
+        description="Database connection URL. Env var: DATABASE_URL",
+    )
+    pool_size: int = Field(default=5, description="Connection pool size")
+    max_overflow: int = Field(default=10, description="Max overflow connections")
+    pool_timeout: int = Field(default=30, description="Pool timeout in seconds")
+    pool_recycle: int = Field(default=3600, description="Pool recycle time in seconds")
+    echo: bool = Field(default=False, description="Echo SQL queries (debug mode)")
+
+    @property
+    def async_url(self) -> str:
+        """Get async database URL."""
+        url = self.url
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql+psycopg2://"):
+            url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        return url
+
+
 class ContextWindowSettings(BaseSettings):
     """Context window and conversation history configuration."""
 
@@ -330,6 +356,7 @@ class Settings(BaseSettings):
     cors: CorsSettings = Field(default_factory=CorsSettings)
     prompt: PromptSettings = Field(default_factory=PromptSettings)
     grpc: GRPCSettings = Field(default_factory=GRPCSettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
 
     @field_validator("environment", mode="before")
     @classmethod

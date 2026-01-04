@@ -156,3 +156,25 @@ class SendNotificationResult(BaseModel):
     created_at: datetime
 
 
+# ===== CLIENT INFORMATION MANAGEMENT TOOLS =====
+
+
+class UpdateClientInfoArgs(BaseModel):
+    """Arguments for `update_client_info` tool."""
+
+    client_id: str = Field(..., description="Client UUID (provided by system)")
+    first_name: Optional[str] = Field(None, description="Client's first name")
+    last_name: Optional[str] = Field(None, description="Client's last name")
+    email: Optional[str] = Field(None, description="Client's email address")
+    external_crm_id: Optional[str] = Field(None, description="External CRM identifier")
+
+
+class UpdateClientInfoResult(BaseModel):
+    """Tool result payload for `update_client_info`."""
+
+    client_id: str
+    updated_fields: List[str] = Field(default_factory=list, description="List of fields that were updated")
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[str] = None
+    external_crm_id: Optional[str] = None

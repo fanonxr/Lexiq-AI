@@ -22,6 +22,8 @@ from cognitive_orch.models.tools import (
     CreateLeadResult,
     SendNotificationArgs,
     SendNotificationResult,
+    UpdateClientInfoArgs,
+    UpdateClientInfoResult,
     ToolError,
     ToolResult,
 )
@@ -99,6 +101,15 @@ class ToolService:
                 is_side_effect=True,
                 requires_confirmation=True,
                 timeout_seconds=float(self._core_api_timeout),
+            ),
+            "update_client_info": ToolSpec(
+                name="update_client_info",
+                args_model=UpdateClientInfoArgs,
+                handler=self._handle_update_client_info,
+                description="Update client contact information (name, email, CRM ID). Use when client provides their details during conversation.",
+                is_side_effect=True,
+                requires_confirmation=False,  # No confirmation needed - just collecting info
+                timeout_seconds=5.0,  # Fast local database operation
             ),
         }
 
@@ -361,6 +372,69 @@ class ToolService:
                 message="Core API returned invalid JSON",
                 status_code=502,
                 details={"endpoint": "/api/v1/notifications"},
+            ) from e
+
+    async def _handle_update_client_info(self, args: UpdateClientInfoArgs) -> UpdateClientInfoResult:
+        """
+        Handle update_client_info tool execution.
+        
+        This tool updates client information in the database during conversation.
+        It's integrated into the existing tool infrastructure for consistent handling.
+        
+        Args:
+            args: Validated arguments containing client info to update
+        
+        Returns:
+            UpdateClientInfoResult: Updated client information
+        
+        Raises:
+            ToolExecutionError: If update fails
+        """
+        try:
+            # Import here to avoid circular dependency
+            from cognitive_orch.services.memory_service import MemoryService
+            
+            memory_service = MemoryService()
+            
+            # Update client info in database
+            await memory_service.update_client_info(
+                client_id=args.client_id,
+                email=args.email,
+                external_crm_id=args.external_crm_id,
+                first_name=args.first_name,
+                last_name=args.last_name,
+            )
+            
+            # Build list of updated fields for response
+            updated_fields = []
+            if args.first_name is not None:
+                updated_fields.append("first_name")
+            if args.last_name is not None:
+                updated_fields.append("last_name")
+            if args.email is not None:
+                updated_fields.append("email")
+            if args.external_crm_id is not None:
+                updated_fields.append("external_crm_id")
+            
+            logger.info(
+                f"Successfully updated client {args.client_id} with fields: {', '.join(updated_fields)}"
+            )
+            
+            return UpdateClientInfoResult(
+                client_id=args.client_id,
+                updated_fields=updated_fields,
+                first_name=args.first_name,
+                last_name=args.last_name,
+                email=args.email,
+                external_crm_id=args.external_crm_id,
+            )
+            
+        except Exception as e:
+            logger.error(f"Error updating client info for {args.client_id}: {e}", exc_info=True)
+            raise ToolExecutionError(
+                tool_name="update_client_info",
+                message=f"Failed to update client information: {str(e)}",
+                details={"client_id": args.client_id, "error": str(e)},
             ) from e
 
 

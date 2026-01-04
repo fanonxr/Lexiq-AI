@@ -954,3 +954,102 @@ class FirmPersona(Base):
 
     def __repr__(self) -> str:
         return f"<FirmPersona(firm_id={self.firm_id})>"
+
+
+class Client(Base):
+    """Client database model for tracking callers with multiple identifiers.
+    
+    This model supports the Long-Term Memory feature, allowing the system to
+    recognize returning callers and personalize their experience.
+    
+    Supports multiple identification methods:
+    - Phone number (primary, always required)
+    - Email (secondary, collected during conversation)
+    - External CRM ID (for integration with existing systems)
+    """
+
+    __tablename__ = "clients"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Foreign key
+    firm_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("firms.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Primary identifier (always present)
+    phone_number: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    
+    # Secondary identifiers (optional, collected over time)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    external_crm_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    
+    # Personal information
+    first_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    last_called_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+
+    # Relationships
+    memories: Mapped[list["ClientMemory"]] = relationship(
+        "ClientMemory", back_populates="client", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        name = f"{self.first_name or ''} {self.last_name or ''}".strip()
+        name_str = f", name={name}" if name else ""
+        email_str = f", email={self.email}" if self.email else ""
+        return f"<Client(id={self.id}, phone={self.phone_number}{name_str}{email_str})>"
+
+
+class ClientMemory(Base):
+    """Client memory database model for storing conversation summaries.
+    
+    Stores AI-generated summaries of past interactions. Embeddings are stored
+    in Qdrant for semantic search, not in PostgreSQL.
+    """
+
+    __tablename__ = "client_memories"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Foreign key
+    client_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Memory content
+    summary_text: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Qdrant point ID (reference to vector in Qdrant)
+    qdrant_point_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True
+    )
+
+    # Relationships
+    client: Mapped["Client"] = relationship("Client", back_populates="memories")
+
+    def __repr__(self) -> str:
+        preview = self.summary_text[:50] + "..." if len(self.summary_text) > 50 else self.summary_text
+        return f"<ClientMemory(id={self.id}, client_id={self.client_id}, summary='{preview}')>"

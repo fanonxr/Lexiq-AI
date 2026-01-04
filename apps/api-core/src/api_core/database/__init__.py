@@ -12,6 +12,8 @@ from api_core.database.models import (
     Base,
     CalendarIntegration,
     Call,
+    Client,
+    ClientMemory,
     Conversation,
     ConversationMessage,
     Firm,
@@ -52,6 +54,8 @@ __all__ = [
     "Conversation",
     "ConversationMessage",
     "Call",
+    "Client",
+    "ClientMemory",
     # Connection
     "get_engine",
     "create_engine",
