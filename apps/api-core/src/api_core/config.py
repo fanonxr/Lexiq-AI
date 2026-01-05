@@ -145,6 +145,20 @@ class AzureKeyVaultSettings(BaseSettings):
         return self.enabled and bool(self.url)
 
 
+class GoogleSettings(BaseSettings):
+    """Google OAuth configuration for Google Calendar integration."""
+
+    model_config = SettingsConfigDict(env_prefix="GOOGLE_", case_sensitive=False)
+
+    client_id: Optional[str] = Field(default=None, description="Google OAuth client ID")
+    client_secret: Optional[str] = Field(default=None, description="Google OAuth client secret")
+
+    @property
+    def is_configured(self) -> bool:
+        """Check if Google OAuth is configured."""
+        return bool(self.client_id and self.client_secret)
+
+
 class StorageSettings(BaseSettings):
     """Azure Blob Storage configuration for knowledge base files."""
 
@@ -321,6 +335,7 @@ class Settings(BaseSettings):
     jwt: JWTSettings = Field(default_factory=JWTSettings)
     cors: CorsSettings = Field(default_factory=CorsSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
+    google: GoogleSettings = Field(default_factory=GoogleSettings)
 
     @field_validator("environment", mode="before")
     @classmethod

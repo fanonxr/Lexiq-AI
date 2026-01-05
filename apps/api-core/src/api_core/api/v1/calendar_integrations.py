@@ -51,6 +51,8 @@ class SyncCalendarResponse(BaseModel):
 
     success: bool = Field(..., description="Whether the sync was successful")
     appointments_synced: int = Field(..., description="Number of appointments synced")
+    task_id: Optional[str] = Field(default=None, description="Celery task ID (if async)")
+    message: Optional[str] = Field(default=None, description="Human-readable status message")
 
 
 @router.post(
@@ -155,9 +157,9 @@ async def handle_outlook_oauth_callback(
 @router.post(
     "/outlook/sync",
     response_model=SyncCalendarResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Sync Outlook calendar",
-    description="Sync appointments from Outlook calendar to LexiqAI",
+    status_code=status.HTTP_202_ACCEPTED,  # Changed from 200 to 202 (Accepted - async processing)
+    summary="Sync Outlook calendar (async)",
+    description="Trigger async calendar sync from Outlook to LexiqAI. Returns immediately with task ID.",
 )
 async def sync_outlook_calendar(
     start_date: Optional[str] = Query(
@@ -170,7 +172,12 @@ async def sync_outlook_calendar(
     ),
     current_user: TokenValidationResult = Depends(get_current_active_user),
 ):
-    """Sync Outlook calendar."""
+    """
+    Trigger Outlook calendar sync as background task.
+    
+    This endpoint triggers an async Celery task and returns immediately.
+    Use the task_id to check sync status.
+    """
     try:
         async with get_session_context() as session:
             service = CalendarIntegrationService(session)
@@ -184,28 +191,59 @@ async def sync_outlook_calendar(
                     detail="Outlook integration not found. Please connect your Outlook calendar first.",
                 )
 
-            # Parse date parameters if provided
-            from datetime import datetime
+            # Trigger async Celery task in integration-worker using Celery client
+            try:
+                from api_core.celery_client import send_calendar_sync_task
+                
+                # Send task with optional date range
+                task_id = send_calendar_sync_task(
+                    integration_type="outlook",
+                    integration_id=str(integration.id),
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                
+                logger.info(
+                    f"Triggered Outlook calendar sync task {task_id} for integration {integration.id}"
+                )
+                
+                return SyncCalendarResponse(
+                    success=True,
+                    appointments_synced=0,  # Will be updated by background task
+                    task_id=task_id,
+                    message="Sync started. This may take a few moments.",
+                )
+                
+            except (ImportError, RuntimeError) as e:
+                # Fallback: If Celery is not available, run sync synchronously
+                logger.warning(
+                    f"Celery client not available, running sync synchronously: {e}. "
+                    f"Please rebuild api-core container to install Celery dependency."
+                )
+                
+                # Parse date parameters if provided
+                from datetime import datetime, timedelta
 
-            start_dt = None
-            end_dt = None
-            if start_date:
-                start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-            if end_date:
-                end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                start_dt = None
+                end_dt = None
+                if start_date:
+                    start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+                if end_date:
+                    end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
 
-            # Default to 30 days ago to 90 days ahead if not specified
-            if not start_dt:
-                from datetime import timedelta
+                # Default to 30 days ago to 90 days ahead if not specified
+                if not start_dt:
+                    start_dt = datetime.utcnow() - timedelta(days=30)
+                if not end_dt:
+                    end_dt = datetime.utcnow() + timedelta(days=90)
 
-                start_dt = datetime.utcnow() - timedelta(days=30)
-            if not end_dt:
-                from datetime import timedelta
-
-                end_dt = datetime.utcnow() + timedelta(days=90)
-
-            count = await service.sync_outlook_calendar(integration, start_dt, end_dt)
-            return SyncCalendarResponse(success=True, appointments_synced=count)
+                count = await service.sync_outlook_calendar(integration, start_dt, end_dt)
+                return SyncCalendarResponse(
+                    success=True,
+                    appointments_synced=count,
+                    message="Sync completed successfully.",
+                )
+                
     except ValidationError as e:
         logger.error(f"Validation error syncing Outlook calendar: {e}")
         raise HTTPException(
@@ -268,5 +306,248 @@ async def disconnect_outlook_calendar(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to disconnect Outlook calendar",
+        ) from e
+
+
+# ============================================================================
+# Google Calendar Integration Endpoints
+# ============================================================================
+
+@router.post(
+    "/google/initiate",
+    response_model=InitiateOAuthResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Initiate Google OAuth flow",
+    description="Generate OAuth authorization URL for Google Calendar integration",
+)
+async def initiate_google_oauth(
+    request: InitiateOAuthRequest,
+    current_user: TokenValidationResult = Depends(get_current_active_user),
+):
+    """Initiate Google OAuth flow.
+    
+    Requires authentication - user must be logged in to connect their calendar.
+    """
+    try:
+        if not current_user or not current_user.user_id:
+            logger.error("Invalid user context in initiate_google_oauth")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required. Please log in to connect your calendar.",
+            )
+        
+        logger.info(f"Initiating Google OAuth for user {current_user.user_id}, redirect_uri={request.redirect_uri}")
+        async with get_session_context() as session:
+            service = CalendarIntegrationService(session)
+            auth_url = await service.initiate_google_oauth(
+                user_id=current_user.user_id,
+                redirect_uri=request.redirect_uri,
+            )
+            
+            if not auth_url:
+                logger.error("Auth URL is None or empty")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to generate authorization URL",
+                )
+            
+            logger.info(f"Returning Google authUrl: {auth_url[:100]}...")
+            return InitiateOAuthResponse(authUrl=auth_url)
+    except ValidationError as e:
+        logger.error(f"Validation error initiating Google OAuth: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.error(f"Error initiating Google OAuth: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to initiate Google OAuth flow",
+        ) from e
+
+
+@router.post(
+    "/google/callback",
+    response_model=OAuthCallbackResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Handle Google OAuth callback",
+    description="Exchange authorization code for tokens and store calendar integration",
+)
+async def handle_google_oauth_callback(
+    request: OAuthCallbackRequest,
+    current_user: TokenValidationResult = Depends(get_current_active_user),
+):
+    """Handle Google OAuth callback."""
+    try:
+        # Verify that the state (user_id) matches the current user
+        if request.state != current_user.user_id:
+            raise AuthorizationError("State parameter does not match current user")
+
+        async with get_session_context() as session:
+            service = CalendarIntegrationService(session)
+            integration = await service.handle_google_oauth_callback(
+                user_id=request.state,  # user_id passed in state
+                authorization_code=request.code,
+                redirect_uri=request.redirect_uri,
+            )
+            
+            # Trigger webhook subscription creation (if needed in future)
+            # For now, just return success
+            
+            return OAuthCallbackResponse(success=True, integration_id=integration.id)
+    except ValidationError as e:
+        logger.error(f"Validation error in Google OAuth callback: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except AuthorizationError as e:
+        logger.error(f"Authorization error in Google OAuth callback: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.error(f"Error handling Google OAuth callback: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to handle Google OAuth callback",
+        ) from e
+
+
+@router.post(
+    "/google/sync",
+    response_model=SyncCalendarResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Sync Google calendar (async)",
+    description="Trigger async calendar sync from Google Calendar to LexiqAI. Returns immediately with task ID.",
+)
+async def sync_google_calendar(
+    start_date: Optional[str] = Query(
+        None,
+        description="Start date for sync range (ISO8601 format). If not provided, syncs from 30 days ago.",
+    ),
+    end_date: Optional[str] = Query(
+        None,
+        description="End date for sync range (ISO8601 format). If not provided, syncs to 90 days ahead.",
+    ),
+    current_user: TokenValidationResult = Depends(get_current_active_user),
+):
+    """
+    Trigger Google Calendar sync as background task.
+    
+    This endpoint triggers an async Celery task and returns immediately.
+    Use the task_id to check sync status.
+    """
+    try:
+        async with get_session_context() as session:
+            service = CalendarIntegrationService(session)
+            integration = await service.repository.get_by_user_and_type(
+                current_user.user_id,
+                "google",
+            )
+            if not integration:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Google Calendar integration not found. Please connect your Google Calendar first.",
+                )
+
+            # Trigger async Celery task in integration-worker using Celery client
+            try:
+                from api_core.celery_client import send_calendar_sync_task
+                
+                # Send task with optional date range
+                task_id = send_calendar_sync_task(
+                    integration_type="google",
+                    integration_id=str(integration.id),
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                
+                logger.info(
+                    f"Triggered Google Calendar sync task {task_id}"
+                )
+                
+                return SyncCalendarResponse(
+                    success=True,
+                    appointments_synced=0,  # Will be updated by background task
+                    task_id=task_id,
+                    message="Sync started. This may take a few moments.",
+                )
+                
+            except Exception as e:
+                # If Celery client fails, log error
+                logger.error(
+                    f"Failed to trigger Google Calendar sync task: {e}",
+                    exc_info=True,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Calendar sync service is temporarily unavailable. Please try again later.",
+                )
+                
+    except ValidationError as e:
+        logger.error(f"Validation error syncing Google Calendar: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except NotFoundError as e:
+        logger.error(f"Not found error syncing Google Calendar: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.error(f"Error syncing Google Calendar: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to sync Google Calendar",
+        ) from e
+
+
+@router.delete(
+    "/google/disconnect",
+    status_code=status.HTTP_200_OK,
+    summary="Disconnect Google calendar",
+    description="Disconnect and deactivate Google Calendar integration",
+)
+async def disconnect_google_calendar(
+    current_user: TokenValidationResult = Depends(get_current_active_user),
+):
+    """Disconnect Google Calendar integration."""
+    try:
+        async with get_session_context() as session:
+            service = CalendarIntegrationService(session)
+            integration = await service.repository.get_by_user_and_type(
+                current_user.user_id,
+                "google",
+            )
+            if not integration:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Google Calendar integration not found.",
+                )
+
+            await service.disconnect_integration(integration.id, current_user.user_id)
+            return {"success": True, "message": "Google Calendar disconnected successfully"}
+    except NotFoundError as e:
+        logger.error(f"Not found error disconnecting Google Calendar: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except AuthorizationError as e:
+        logger.error(f"Authorization error disconnecting Google Calendar: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.error(f"Error disconnecting Google Calendar: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to disconnect Google Calendar",
         ) from e
 

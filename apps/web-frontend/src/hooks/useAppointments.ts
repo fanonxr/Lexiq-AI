@@ -73,6 +73,7 @@ interface UseMutationResultOptional<TData> {
  * 
  * @param startDate - Optional start date filter
  * @param endDate - Optional end date filter
+ * @param clientsOnly - If true, only return appointments created through LexiqAI (exclude calendar events). Defaults to true.
  * @returns Appointments with loading and error states
  * 
  * @example
@@ -81,11 +82,15 @@ interface UseMutationResultOptional<TData> {
  * 
  * // With date range
  * const { data: appointments } = useAppointments(startDate, endDate);
+ * 
+ * // Show all appointments including calendar events
+ * const { data: allAppointments } = useAppointments(undefined, undefined, false);
  * ```
  */
 export function useAppointments(
   startDate?: Date,
-  endDate?: Date
+  endDate?: Date,
+  clientsOnly: boolean = true
 ): UseQueryResult<Appointment[]> {
   const [data, setData] = useState<Appointment[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,7 +100,7 @@ export function useAppointments(
     try {
       setIsLoading(true);
       setError(null);
-      const appointments = await fetchAppointments(startDate, endDate);
+      const appointments = await fetchAppointments(startDate, endDate, clientsOnly);
       setData(appointments);
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to fetch appointments");
@@ -104,7 +109,7 @@ export function useAppointments(
     } finally {
       setIsLoading(false);
     }
-  }, [startDate, endDate]);
+  }, [startDate, endDate, clientsOnly]);
 
   useEffect(() => {
     refetch();
@@ -241,7 +246,7 @@ export function useUpdateAppointment(): UseMutationResult<
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to update appointment");
         setError(error);
-        logger.error("Error updating appointment", error, { appointmentId: data.appointmentId });
+        logger.error("Error updating appointment", error, { appointmentId });
         throw error;
       } finally {
         setIsLoading(false);
@@ -294,7 +299,7 @@ export function useCancelAppointment(): UseMutationResult<
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to cancel appointment");
         setError(error);
-        logger.error("Error cancelling appointment", error, { appointmentId: data.appointmentId });
+        logger.error("Error cancelling appointment", error, { appointmentId });
         throw error;
       } finally {
         setIsLoading(false);

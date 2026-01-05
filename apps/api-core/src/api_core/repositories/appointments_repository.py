@@ -40,6 +40,7 @@ class AppointmentsRepository(BaseRepository[Appointment]):
         firm_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        clients_only: bool = False,
         skip: int = 0,
         limit: int = 100,
     ) -> List[Appointment]:
@@ -51,6 +52,7 @@ class AppointmentsRepository(BaseRepository[Appointment]):
             firm_id: Optional firm ID to filter by
             start_date: Optional start date filter
             end_date: Optional end date filter
+            clients_only: If True, only return appointments created through LexiqAI (source_calendar_id IS NULL)
             skip: Number of records to skip
             limit: Maximum number of records to return
             
@@ -76,6 +78,11 @@ class AppointmentsRepository(BaseRepository[Appointment]):
                     query = query.where(or_(*conditions))
                 else:
                     query = query.where(conditions[0])
+            
+            # Filter by source: if clients_only=True, only show LexiqAI-created appointments
+            # (appointments where source_calendar_id IS NULL)
+            if clients_only:
+                query = query.where(Appointment.source_calendar_id.is_(None))
             
             # Date range filters
             if start_date:

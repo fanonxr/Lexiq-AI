@@ -197,6 +197,7 @@ class AppointmentsService:
         firm_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        clients_only: bool = False,
         skip: int = 0,
         limit: int = 100,
     ) -> List[Appointment]:
@@ -208,6 +209,7 @@ class AppointmentsService:
             firm_id: Optional firm ID
             start_date: Optional start date filter
             end_date: Optional end date filter
+            clients_only: If True, only return appointments created through LexiqAI (source_calendar_id IS NULL)
             skip: Number of records to skip
             limit: Maximum number of records to return
             
@@ -222,6 +224,7 @@ class AppointmentsService:
             firm_id=firm_id,
             start_date=start_date,
             end_date=end_date,
+            clients_only=clients_only,
             skip=skip,
             limit=limit,
         )

@@ -754,6 +754,14 @@ class CalendarIntegration(Base):
     )
     sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Webhook subscription (for real-time calendar event notifications)
+    webhook_subscription_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )  # Microsoft Graph subscription ID
+    webhook_subscription_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )  # When subscription expires (must be renewed before expiration)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False

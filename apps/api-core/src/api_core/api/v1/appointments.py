@@ -128,6 +128,7 @@ class SyncAppointmentsResponse(BaseModel):
     appointmentsSynced: int = Field(..., description="Number of appointments synced")
     lastSynced: datetime = Field(..., description="Last sync timestamp")
     message: Optional[str] = Field(None, description="Status message")
+    taskIds: Optional[List[str]] = Field(default=None, description="Celery task IDs (if async)")
 
 
 class UpdateAppointmentRequest(BaseModel):
@@ -199,16 +200,25 @@ def _appointment_to_frontend(appointment) -> FrontendAppointment:
     response_model=AppointmentsListResponse,
     status_code=status.HTTP_200_OK,
     summary="List appointments",
-    description="List appointments for the authenticated user, optionally filtered by date range.",
+    description="List appointments for the authenticated user, optionally filtered by date range and source.",
 )
 async def list_appointments(
     startDate: Optional[datetime] = Query(None, description="Start date filter (ISO8601)"),
     endDate: Optional[datetime] = Query(None, description="End date filter (ISO8601)"),
+    clientsOnly: bool = Query(
+        True,
+        description="If true, only return appointments created through LexiqAI (exclude calendar events). Defaults to true.",
+    ),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
     current_user: TokenValidationResult = Depends(get_current_active_user),
 ):
-    """List appointments for the authenticated user."""
+    """
+    List appointments for the authenticated user.
+    
+    By default, only shows client appointments (created through LexiqAI).
+    Set clientsOnly=false to see all appointments including calendar events.
+    """
     try:
         async with get_session_context() as session:
             service = get_appointments_service_for_session(session)
@@ -223,6 +233,7 @@ async def list_appointments(
                 firm_id=firm_id,
                 start_date=startDate,
                 end_date=endDate,
+                clients_only=clientsOnly,
                 skip=skip,
                 limit=limit,
             )
@@ -302,15 +313,20 @@ async def get_integration_status(
 @router.post(
     "/sync",
     response_model=SyncAppointmentsResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Sync appointments",
-    description="Sync appointments from calendar integrations (Outlook/Google Calendar).",
+    status_code=status.HTTP_202_ACCEPTED,  # Changed from 200 to 202 (Accepted - async processing)
+    summary="Sync appointments (async)",
+    description="Trigger async calendar sync for all connected integrations. Returns immediately with task IDs.",
 )
 async def sync_appointments(
     request: SyncAppointmentsRequest,
     current_user: TokenValidationResult = Depends(get_current_active_user),
 ):
-    """Sync appointments from calendar integrations."""
+    """
+    Trigger calendar sync as background task.
+    
+    This endpoint triggers async Celery tasks and returns immediately.
+    The actual sync happens in the background via integration-worker.
+    """
     try:
         async with get_session_context() as session:
             service = CalendarIntegrationService(session)
@@ -324,33 +340,72 @@ async def sync_appointments(
                 integrations = await service.repository.get_by_user(current_user.user_id)
                 integration_types = [intg.integration_type for intg in integrations if intg.is_active]
             
-            total_synced = 0
-            from datetime import timezone
-            last_synced = datetime.now(timezone.utc)
+            # Trigger async tasks for each integration using Celery client
+            task_ids = []
+            triggered_count = 0
             
-            # Sync each integration type
-            for integration_type in integration_types:
-                integration = await service.repository.get_by_user_and_type(
-                    current_user.user_id,
-                    integration_type,
+            try:
+                from api_core.celery_client import send_calendar_sync_task
+                
+                for integration_type in integration_types:
+                    integration = await service.repository.get_by_user_and_type(
+                        current_user.user_id,
+                        integration_type,
+                    )
+                    if integration:
+                        task_id = send_calendar_sync_task(
+                            integration_type=integration_type,
+                            integration_id=str(integration.id),
+                        )
+                        task_ids.append(task_id)
+                        triggered_count += 1
+                        logger.info(
+                            f"Triggered {integration_type} sync task {task_id} for user {current_user.user_id}"
+                        )
+                
+                from datetime import timezone
+                return SyncAppointmentsResponse(
+                    success=True,
+                    appointmentsSynced=0,  # Will be updated by background tasks
+                    lastSynced=datetime.now(timezone.utc),
+                    message=f"Sync started for {triggered_count} integration(s). This may take a few moments.",
+                    taskIds=task_ids if task_ids else None,
                 )
-                if integration:
-                    if integration_type == "outlook":
-                        count = await service.sync_outlook_calendar(integration)
-                        total_synced += count
-                        if integration.last_synced_at:
-                            last_synced = integration.last_synced_at
-                    # Add Google Calendar sync here when implemented
-                    # elif integration_type == "google":
-                    #     count = await service.sync_google_calendar(integration)
-                    #     total_synced += count
-            
-            return SyncAppointmentsResponse(
-                success=True,
-                appointmentsSynced=total_synced,
-                lastSynced=last_synced,
-                message=f"Synced {total_synced} appointment(s) from {len(integration_types)} integration(s)",
-            )
+                
+            except (ImportError, RuntimeError) as e:
+                # Fallback: If Celery is not available, run sync synchronously
+                # This happens if Celery is not installed or Redis is not accessible
+                logger.warning(
+                    f"Celery client not available, running sync synchronously: {e}. "
+                )
+                
+                total_synced = 0
+                from datetime import timezone
+                last_synced = datetime.now(timezone.utc)
+                
+                # Sync each integration type synchronously
+                for integration_type in integration_types:
+                    integration = await service.repository.get_by_user_and_type(
+                        current_user.user_id,
+                        integration_type,
+                    )
+                    if integration:
+                        if integration_type == "outlook":
+                            count = await service.sync_outlook_calendar(integration)
+                            total_synced += count
+                            if integration.last_synced_at:
+                                last_synced = integration.last_synced_at
+                        # Add Google Calendar sync here when implemented
+                        # elif integration_type == "google":
+                        #     count = await service.sync_google_calendar(integration)
+                        #     total_synced += count
+                
+                return SyncAppointmentsResponse(
+                    success=True,
+                    appointmentsSynced=total_synced,
+                    lastSynced=last_synced,
+                    message=f"Synced {total_synced} appointment(s) from {len(integration_types)} integration(s)",
+                )
         
     except Exception as e:
         logger.error(f"Error syncing appointments: {e}", exc_info=True)
@@ -509,9 +564,37 @@ async def get_appointment_sources(
 ):
     """Get appointment source mappings."""
     try:
-        # TODO: Implement actual source tracking when calendar integrations are added
-        # For now, return empty mapping
-        return AppointmentSourceMappingResponse(sources={})
+        async with get_session_context() as session:
+            from sqlalchemy import select
+            from api_core.database.models import Appointment, CalendarIntegration
+            
+            # Query appointments with their source calendar integration
+            # Join with calendar_integrations to get the integration_type
+            query = (
+                select(
+                    Appointment.id,
+                    CalendarIntegration.integration_type,
+                )
+                .outerjoin(
+                    CalendarIntegration,
+                    Appointment.source_calendar_id == CalendarIntegration.id,
+                )
+                .where(Appointment.created_by_user_id == current_user.user_id)
+            )
+            
+            result = await session.execute(query)
+            rows = result.all()
+            
+            # Build mapping of appointment ID to integration type
+            sources: dict[str, str] = {}
+            for appointment_id, integration_type in rows:
+                if integration_type:
+                    # Map integration_type to source string
+                    sources[appointment_id] = integration_type  # "outlook" or "google"
+                # If no integration_type, appointment is from LexiqAI (not synced from calendar)
+                # We don't include it in the mapping, so it will use the default styling
+            
+            return AppointmentSourceMappingResponse(sources=sources)
         
     except Exception as e:
         logger.error(f"Error getting appointment sources: {e}", exc_info=True)
