@@ -6,6 +6,8 @@ from typing import List, Optional
 
 import httpx
 from msal import ConfidentialClientApplication
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_core.database.models import CalendarIntegration, User
@@ -475,4 +477,269 @@ class CalendarIntegrationService:
         integration.refresh_token = None
         await self.session.flush()
         await self.session.refresh(integration)
+
+    async def initiate_google_oauth(self, user_id: str, redirect_uri: str) -> str:
+        """
+        Initiate Google OAuth flow.
+
+        Returns authorization URL for user to visit.
+        """
+        from api_core.config import get_settings
+
+        settings = get_settings()
+
+        # Validate configuration
+        if not settings.google.client_id:
+            raise ValidationError("Google client ID is not configured. Please set GOOGLE_CLIENT_ID environment variable.")
+        if not settings.google.client_secret:
+            raise ValidationError("Google client secret is not configured. Please set GOOGLE_CLIENT_SECRET environment variable.")
+
+        # Normalize redirect_uri (remove trailing slash, ensure consistent format)
+        # Google is very strict about redirect_uri matching exactly
+        normalized_redirect_uri = redirect_uri.rstrip("/")
+        logger.info(
+            f"Initiating Google OAuth for user {user_id}, "
+            f"redirect_uri={normalized_redirect_uri}"
+        )
+
+        # Google OAuth 2.0 scopes for Calendar API
+        # Note: 'openid' is required when using 'userinfo.email' - Google adds it automatically
+        # but we need to include it explicitly to avoid scope mismatch errors
+        scopes = [
+            "openid",  # Required for userinfo.email - must be included explicitly
+            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/userinfo.email",  # Required to get user's email
+        ]
+
+        # Create OAuth flow
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": settings.google.client_id,
+                    "client_secret": settings.google.client_secret,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [normalized_redirect_uri],  # Use normalized URI
+                }
+            },
+            scopes=scopes,
+        )
+        flow.redirect_uri = normalized_redirect_uri  # Use normalized URI
+
+        # Generate authorization URL
+        try:
+            auth_url, _ = flow.authorization_url(
+                access_type="offline",  # Request refresh token
+                include_granted_scopes="true",
+                state=user_id,  # Pass user_id in state for callback
+                prompt="consent",  # Force consent to get refresh token
+            )
+
+            if not auth_url or not isinstance(auth_url, str) or not auth_url.startswith("http"):
+                raise ValidationError(f"Invalid authorization URL format: {auth_url}")
+
+            # Log the redirect_uri that will be used in the authorization URL
+            # Parse the URL to verify redirect_uri parameter
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(auth_url)
+            params = parse_qs(parsed.query)
+            redirect_uri_in_url = params.get("redirect_uri", [None])[0]
+            
+            logger.info(
+                f"Generated Google authorization URL for user {user_id}. "
+                f"redirect_uri in URL: {redirect_uri_in_url}, "
+                f"normalized_redirect_uri: {normalized_redirect_uri}, "
+                f"match: {redirect_uri_in_url == normalized_redirect_uri}"
+            )
+            return auth_url
+
+        except Exception as e:
+            logger.error(f"Error generating Google authorization URL: {e}", exc_info=True)
+            raise ValidationError(f"Failed to generate authorization URL: {str(e)}") from e
+
+    async def handle_google_oauth_callback(
+        self,
+        user_id: str,
+        authorization_code: str,
+        redirect_uri: str,
+    ) -> CalendarIntegration:
+        """
+        Handle Google OAuth callback and store tokens.
+        """
+        from api_core.config import get_settings
+
+        settings = get_settings()
+
+        # Validate configuration
+        if not settings.google.client_id:
+            raise ValidationError("Google client ID is not configured")
+        if not settings.google.client_secret:
+            raise ValidationError("Google client secret is not configured")
+
+        # Normalize redirect_uri (remove trailing slash, ensure consistent format)
+        # Google is very strict about redirect_uri matching exactly
+        normalized_redirect_uri = redirect_uri.rstrip("/")
+        logger.info(
+            f"Handling Google OAuth callback for user {user_id}, "
+            f"redirect_uri={normalized_redirect_uri}, "
+            f"code_length={len(authorization_code) if authorization_code else 0}"
+        )
+
+        # Google OAuth 2.0 scopes
+        # Note: 'openid' is required when using 'userinfo.email' - Google adds it automatically
+        # but we need to include it explicitly to avoid scope mismatch errors
+        scopes = [
+            "openid",  # Required for userinfo.email - must be included explicitly
+            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/userinfo.email",  # Required to get user's email
+        ]
+
+        # Create OAuth flow
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": settings.google.client_id,
+                    "client_secret": settings.google.client_secret,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [normalized_redirect_uri],  # Use normalized URI
+                }
+            },
+            scopes=scopes,
+        )
+        flow.redirect_uri = normalized_redirect_uri  # Use normalized URI
+
+        # Exchange authorization code for tokens
+        try:
+            # Log all details for debugging
+            logger.info(
+                f"Exchanging authorization code for tokens. "
+                f"redirect_uri={normalized_redirect_uri}, "
+                f"client_id={settings.google.client_id[:20] if settings.google.client_id else 'MISSING'}..., "
+                f"code_length={len(authorization_code) if authorization_code else 0}, "
+                f"flow.redirect_uri={flow.redirect_uri}, "
+                f"scopes={scopes}"
+            )
+            
+            # Verify flow configuration matches
+            if flow.redirect_uri != normalized_redirect_uri:
+                logger.warning(
+                    f"Flow redirect_uri mismatch! "
+                    f"flow.redirect_uri={flow.redirect_uri}, "
+                    f"normalized_redirect_uri={normalized_redirect_uri}"
+                )
+                flow.redirect_uri = normalized_redirect_uri
+            
+            # fetch_token will use flow.redirect_uri that we set above
+            # Don't pass redirect_uri as parameter since it's already set on the flow object
+            try:
+                flow.fetch_token(code=authorization_code)
+            except Exception as fetch_error:
+                # Log the actual error response from Google if available
+                error_details = str(fetch_error)
+                logger.error(
+                    f"Google fetch_token failed: {error_details}. "
+                    f"redirect_uri={normalized_redirect_uri}, "
+                    f"client_id={settings.google.client_id[:20] if settings.google.client_id else 'MISSING'}..., "
+                    f"code_length={len(authorization_code) if authorization_code else 0}"
+                )
+                # Re-raise to be caught by outer exception handler
+                raise
+            
+            credentials = flow.credentials
+
+            if not credentials or not credentials.token:
+                logger.error("Failed to obtain access token from Google OAuth flow")
+                raise ValidationError("Failed to obtain access token from Google")
+
+            access_token = credentials.token
+            logger.info(f"Successfully obtained Google access token (length: {len(access_token) if access_token else 0})")
+
+            # Get user's email from Google API
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        "https://www.googleapis.com/oauth2/v2/userinfo",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                        timeout=10.0,
+                    )
+                    response.raise_for_status()
+                    user_info = response.json()
+                    email = user_info.get("email")
+                    logger.info(f"Retrieved user email from Google: {email}")
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    f"HTTP error calling Google userinfo API: {e.response.status_code} - {e.response.text}",
+                    exc_info=True,
+                )
+                # If userinfo fails, try to get email from token's id_token if available
+                # Otherwise, we'll need to skip email or use a different approach
+                raise ValidationError(
+                    f"Failed to retrieve user email from Google: {e.response.status_code} - {e.response.text}"
+                ) from e
+
+            if not email:
+                logger.warning("Google userinfo API returned no email")
+                raise ValidationError("Failed to get user email from Google")
+
+            # Store tokens
+            access_token = credentials.token
+            refresh_token = credentials.refresh_token
+            expires_at = credentials.expiry if credentials.expiry else (
+                datetime.now(timezone.utc) + timedelta(seconds=3600)
+            )
+
+            # Get default calendar ID (primary calendar)
+            calendar_id = "primary"  # Google's default calendar
+
+            # Create or update integration
+            existing = await self.repository.get_by_user_and_type(user_id, "google")
+            if existing:
+                existing.access_token = access_token
+                existing.refresh_token = refresh_token
+                existing.token_expires_at = expires_at
+                existing.calendar_id = calendar_id
+                existing.email = email
+                existing.is_active = True
+                existing.sync_error = None
+                await self.session.flush()
+                await self.session.refresh(existing)
+                return existing
+            else:
+                return await self.repository.create(
+                    user_id=user_id,
+                    integration_type="google",
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    token_expires_at=expires_at,
+                    calendar_id=calendar_id,
+                    email=email,
+                )
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error in Google OAuth callback: {e.response.status_code} - {e.response.text}",
+                exc_info=True,
+            )
+            raise ValidationError(f"OAuth error: {e.response.text}") from e
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(
+                f"Error in Google OAuth callback: {error_msg}. "
+                f"redirect_uri={normalized_redirect_uri}, "
+                f"code_length={len(authorization_code) if authorization_code else 0}",
+                exc_info=True,
+            )
+            # Provide more helpful error message for invalid_grant
+            if "invalid_grant" in error_msg.lower():
+                raise ValidationError(
+                    f"OAuth authorization failed. This usually means: "
+                    f"(1) The authorization code was already used or expired, "
+                    f"(2) The redirect_uri doesn't match exactly what was used in the authorization request, "
+                    f"(3) The redirect_uri doesn't match what's configured in Google Cloud Console. "
+                    f"Please try connecting again. redirect_uri={normalized_redirect_uri}"
+                ) from e
+            raise ValidationError(f"Failed to handle OAuth callback: {error_msg}") from e
 

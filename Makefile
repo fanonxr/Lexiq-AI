@@ -553,6 +553,151 @@ ingestion-ready: ## Check document-ingestion service readiness
 	@echo "Checking Document Ingestion Service readiness..."
 	@curl -s http://localhost:8003/ready | python3 -m json.tool || echo "Service not running or not accessible"
 
+# Integration Worker Service commands
+# Virtual environment paths
+WORKER_VENV_PATH := apps/integration-worker/.venv
+WORKER_VENV_ACTIVATE := $(WORKER_VENV_PATH)/bin/activate
+WORKER_VENV_PYTHON := $(WORKER_VENV_PATH)/bin/python
+
+# Use venv if it exists, otherwise use system commands
+ifeq ($(wildcard $(WORKER_VENV_ACTIVATE)),)
+	WORKER_CELERY_CMD := celery
+	WORKER_PYTEST_CMD := pytest
+	WORKER_BLACK_CMD := black
+	WORKER_RUFF_CMD := ruff
+else
+	WORKER_CELERY_CMD := .venv/bin/celery
+	WORKER_PYTEST_CMD := .venv/bin/pytest
+	WORKER_BLACK_CMD := .venv/bin/black
+	WORKER_RUFF_CMD := .venv/bin/ruff
+endif
+
+worker-venv-setup: ## Set up Python virtual environment for integration-worker
+	@echo "Setting up Python virtual environment for Integration Worker..."
+	cd apps/integration-worker && python3 -m venv .venv
+	@echo "✓ Virtual environment created at apps/integration-worker/.venv"
+	@echo "Activate it with: source apps/integration-worker/.venv/bin/activate"
+	@echo "Or install dependencies with: make worker-venv-install"
+
+worker-venv-install: ## Install dependencies in integration-worker virtual environment
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "Virtual environment not found. Creating it..."; \
+		$(MAKE) worker-venv-setup; \
+	fi
+	@echo "Installing dependencies for Integration Worker..."
+	cd apps/integration-worker && .venv/bin/python -m pip install --upgrade pip
+	cd apps/integration-worker && .venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt
+	@echo "✓ Dependencies installed (including api-core)"
+
+worker-start: ## Start Celery worker
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Starting Integration Worker (Celery worker)..."
+	cd apps/integration-worker && PYTHONPATH=src:../api-core/src $(WORKER_CELERY_CMD) -A integration_worker.celery_app worker --loglevel=info --concurrency=4
+
+worker-beat: ## Start Celery beat scheduler
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Starting Integration Worker Beat (Celery scheduler)..."
+	cd apps/integration-worker && PYTHONPATH=src:../api-core/src $(WORKER_CELERY_CMD) -A integration_worker.celery_app beat --loglevel=info
+
+worker-flower: ## Start Celery Flower (web monitoring UI)
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Starting Celery Flower monitoring UI..."
+	@echo "Flower will be available at http://localhost:5555"
+	cd apps/integration-worker && PYTHONPATH=src:../api-core/src $(WORKER_CELERY_CMD) -A integration_worker.celery_app flower
+
+worker-status: ## Check Celery worker status
+	@echo "Checking Integration Worker status..."
+	cd apps/integration-worker && PYTHONPATH=src:../api-core/src $(WORKER_CELERY_CMD) -A integration_worker.celery_app inspect active || echo "Worker not running or not accessible"
+
+worker-purge: ## Purge all pending tasks from Celery queue
+	@echo "⚠️  This will delete ALL pending tasks from the queue!"
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		cd apps/integration-worker && PYTHONPATH=src:../api-core/src $(WORKER_CELERY_CMD) -A integration_worker.celery_app purge -f; \
+	fi
+
+worker-test: ## Run integration-worker tests
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Running Integration Worker tests..."
+	cd apps/integration-worker && PYTHONPATH=src:../api-core/src $(WORKER_PYTEST_CMD) tests/ -v
+
+worker-test-cov: ## Run integration-worker tests with coverage
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Running Integration Worker tests with coverage..."
+	cd apps/integration-worker && PYTHONPATH=src:../api-core/src $(WORKER_PYTEST_CMD) tests/ --cov=integration_worker --cov-report=html --cov-report=term-missing
+
+worker-format: ## Format integration-worker code with black
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Formatting Integration Worker code..."
+	cd apps/integration-worker && $(WORKER_BLACK_CMD) src/ tests/
+
+worker-lint: ## Lint integration-worker code with ruff
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Linting Integration Worker code..."
+	cd apps/integration-worker && $(WORKER_RUFF_CMD) check --fix src/ tests/
+
+worker-check: ## Run all code quality checks for integration-worker
+	@echo "Running all code quality checks for Integration Worker..."
+	$(MAKE) worker-format
+	$(MAKE) worker-lint
+
+worker-verify: ## Run integration-worker setup verification
+	@echo "Verifying Integration Worker setup..."
+	cd apps/integration-worker && PYTHONPATH=src:../api-core/src python verify_setup.py
+
+docker-build-worker: ## Build integration-worker Docker image
+	$(DOCKER_COMPOSE) build integration-worker integration-worker-beat
+
+docker-rebuild-worker: ## Rebuild and restart integration-worker services
+	$(DOCKER_COMPOSE) up -d --build integration-worker integration-worker-beat
+
+docker-logs-worker: ## View integration-worker logs
+	$(DOCKER_COMPOSE) logs -f integration-worker
+
+docker-logs-worker-beat: ## View integration-worker-beat logs
+	$(DOCKER_COMPOSE) logs -f integration-worker-beat
+
+docker-build-worker-webhooks: ## Build integration-worker-webhooks Docker image
+	$(DOCKER_COMPOSE) build integration-worker-webhooks
+
+docker-rebuild-worker-webhooks: ## Rebuild and restart integration-worker-webhooks service
+	$(DOCKER_COMPOSE) up -d --build integration-worker-webhooks
+
+docker-logs-worker-webhooks: ## View integration-worker-webhooks logs
+	$(DOCKER_COMPOSE) logs -f integration-worker-webhooks
+
+worker-webhooks-start: ## Start webhook server locally
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Starting Integration Worker Webhook Server..."
+	@echo "Server will be available at http://localhost:8002"
+	@echo "API docs will be available at http://localhost:8002/docs"
+	cd apps/integration-worker && PYTHONPATH=src:../api-core/src .venv/bin/uvicorn integration_worker.main:app --reload --host 0.0.0.0 --port 8002
+
 # Voice Gateway Service commands (Go)
 voice-deps: ## Download and tidy Go dependencies for voice-gateway
 	@echo "Downloading Go dependencies for Voice Gateway..."

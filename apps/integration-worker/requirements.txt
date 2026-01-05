@@ -1,0 +1,39 @@
+# Integration Worker - Production Dependencies
+# Generated from pyproject.toml - keep in sync
+
+# Shared Database Models (from api-core)
+# Install in editable mode for local development
+-e ../api-core
+
+# Core
+celery==5.3.0
+redis==5.0.1
+python-dotenv==1.0.0
+
+# Database
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# Data Validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# HTTP Client
+httpx==0.25.2
+
+# Microsoft Graph / Outlook
+msal==1.31.0
+
+# Google Calendar
+google-auth-oauthlib==1.2.1  # Google OAuth flow (latest stable)
+google-auth==2.35.0  # Google OAuth (latest stable)
+google-api-python-client==2.115.0
+
+# Retry Logic
+tenacity==8.2.3
+
+# Webhook Server (FastAPI)
+fastapi==0.104.0
+uvicorn[standard]==0.24.0
+

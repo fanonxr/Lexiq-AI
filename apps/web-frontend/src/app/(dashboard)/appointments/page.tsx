@@ -8,6 +8,8 @@ import { AppointmentCalendar } from "@/components/appointments/AppointmentCalend
 import { WeeklyCalendarView } from "@/components/appointments/WeeklyCalendarView";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/Label";
 import { Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -18,7 +20,7 @@ import {
   useCancelAppointment,
   useAppointmentSources,
 } from "@/hooks/useAppointments";
-import { initiateOutlookOAuth } from "@/lib/api/calendar-integrations";
+import { initiateOutlookOAuth, initiateGoogleOAuth } from "@/lib/api/calendar-integrations";
 import { logger } from "@/lib/logger";
 
 // Force dynamic rendering because layout uses client components
@@ -37,54 +39,60 @@ export const runtime = "nodejs";
  */
 function AppointmentsPageContent() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  // View toggle: "clients" (default) shows only LexiqAI-created appointments, "all" shows everything
+  const [showClientsOnly, setShowClientsOnly] = useState<boolean>(true);
 
-  // Fetch appointments and integration status
-  const { data: appointments = [], isLoading: isLoadingAppointments, error: appointmentsError, refetch: refetchAppointments } = useAppointments();
+  // Fetch client appointments (for the list) - filtered by clientsOnly
+  const { data: clientAppointments = [], isLoading: isLoadingClientAppointments, error: clientAppointmentsError, refetch: refetchClientAppointments } = useAppointments(undefined, undefined, showClientsOnly);
+  
+  // Fetch all appointments (for the weekly calendar) - always show all
+  const { data: allAppointments = [] } = useAppointments(undefined, undefined, false);
+  
   const { data: integrations = [], isLoading: isLoadingIntegrations } = useIntegrationStatus();
   const { mutate: syncAppointments, isLoading: isSyncing } = useSyncAppointments();
   const { mutate: updateAppointment } = useUpdateAppointment();
   const { mutate: cancelAppointment } = useCancelAppointment();
   const { data: appointmentSources } = useAppointmentSources();
+  
+  // Use client appointments for the list, all appointments for the calendar
+  const appointments = showClientsOnly ? clientAppointments : allAppointments;
+  const isLoadingAppointments = isLoadingClientAppointments;
+  const appointmentsError = clientAppointmentsError;
+  
+  const refetchAppointments = useCallback(async () => {
+    await refetchClientAppointments();
+  }, [refetchClientAppointments]);
 
-  // Get last synced time from integrations (use the most recent one)
-  const lastSynced = useMemo(() => {
-    if (!integrations || integrations.length === 0) {
-      return new Date();
-    }
-    const syncedDates = integrations
-      .filter((int) => int.lastSynced)
-      .map((int) => new Date(int.lastSynced!))
-      .sort((a, b) => b.getTime() - a.getTime());
-    return syncedDates.length > 0 ? syncedDates[0] : new Date();
-  }, [integrations]);
-
-  // Get primary integration (outlook or google) for the health card
-  const primaryIntegration = useMemo<IntegrationType>(() => {
-    if (!integrations || integrations.length === 0) {
-      return "outlook";
-    }
-    // Prefer outlook if available, otherwise google
-    const outlook = integrations.find((int) => int.type === "outlook");
-    return outlook ? "outlook" : "google";
-  }, [integrations]);
-
-  const primaryIntegrationStatus = useMemo(() => {
+  // Get integration status for Outlook
+  const outlookIntegration = useMemo(() => {
     if (!integrations || integrations.length === 0) {
       return { isConnected: false, lastSynced: null };
     }
-    const integration = integrations.find((int) => int.type === primaryIntegration);
+    const integration = integrations.find((int) => int.type === "outlook");
     return {
       isConnected: integration?.isConnected ?? false,
       lastSynced: integration?.lastSynced ? new Date(integration.lastSynced) : null,
     };
-  }, [integrations, primaryIntegration]);
+  }, [integrations]);
+
+  // Get integration status for Google
+  const googleIntegration = useMemo(() => {
+    if (!integrations || integrations.length === 0) {
+      return { isConnected: false, lastSynced: null };
+    }
+    const integration = integrations.find((int) => int.type === "google");
+    return {
+      isConnected: integration?.isConnected ?? false,
+      lastSynced: integration?.lastSynced ? new Date(integration.lastSynced) : null,
+    };
+  }, [integrations]);
 
   /**
-   * Handle refresh/sync
+   * Handle refresh/sync for a specific integration
    */
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(async (integration?: IntegrationType) => {
     try {
-      await syncAppointments();
+      await syncAppointments(integration);
       // Refetch appointments after sync
       await refetchAppointments();
     } catch (error) {
@@ -96,7 +104,6 @@ function AppointmentsPageContent() {
    * Handle edit appointment
    */
   const handleEdit = useCallback((appointmentId: string) => {
-    logger.debug("Edit appointment", { appointmentId });
     // TODO: Open edit modal or navigate to edit page
     // For now, this is a placeholder
   }, []);
@@ -120,25 +127,14 @@ function AppointmentsPageContent() {
   const handleConnectOutlook = useCallback(async () => {
     try {
       const redirectUri = `${window.location.origin}/auth/outlook/callback`;
-      logger.debug("Initiating Outlook OAuth", { redirectUri });
-      
       const authUrl = await initiateOutlookOAuth(redirectUri);
-      logger.debug("Received authUrl", { hasAuthUrl: !!authUrl });
       
-      if (!authUrl || typeof authUrl !== "string") {
+      if (!authUrl || typeof authUrl !== "string" || !authUrl.startsWith("http")) {
         logger.error("Invalid authUrl received", undefined, { authUrl });
-        alert("Failed to get authorization URL. Please check the console for details.");
+        alert("Failed to get authorization URL. Please try again.");
         return;
       }
       
-      if (!authUrl.startsWith("http")) {
-        logger.error("Invalid authUrl format", undefined, { authUrl });
-        alert("Invalid authorization URL format. Please check the console for details.");
-        return;
-      }
-      
-      // Redirect user to Microsoft OAuth page
-      logger.info("Redirecting to Outlook OAuth", { authUrl: authUrl.substring(0, 50) + "..." });
       window.location.href = authUrl;
     } catch (error) {
       logger.error("Failed to initiate Outlook OAuth", error instanceof Error ? error : new Error(String(error)));
@@ -148,48 +144,87 @@ function AppointmentsPageContent() {
   }, []);
 
   /**
-   * Handle connect Google calendar (placeholder for future implementation)
+   * Handle connect Google calendar
    */
   const handleConnectGoogle = useCallback(async () => {
-    // TODO: Implement Google Calendar OAuth flow
-    logger.info("Google Calendar connection not yet implemented");
+    try {
+      const redirectUri = `${window.location.origin}/auth/google/callback`;
+      const authUrl = await initiateGoogleOAuth(redirectUri);
+      
+      if (!authUrl || typeof authUrl !== "string" || !authUrl.startsWith("http")) {
+        logger.error("Invalid authUrl received", undefined, { authUrl });
+        alert("Failed to get authorization URL. Please try again.");
+        return;
+      }
+      
+      window.location.href = authUrl;
+    } catch (error) {
+      logger.error("Failed to initiate Google OAuth", error instanceof Error ? error : new Error(String(error)));
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      alert(`Failed to connect Google Calendar: ${errorMessage}`);
+    }
   }, []);
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-          Appointments
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage your calendar appointments synced from Outlook and Google Calendar
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+            Appointments
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage your calendar appointments synced from Outlook and Google Calendar
+          </p>
+        </div>
+        
+        {/* View Toggle */}
+        <div className="flex items-center gap-3">
+          <Label htmlFor="view-toggle" className="text-sm text-muted-foreground cursor-pointer">
+            {showClientsOnly ? "Clients" : "All Appointments"}
+          </Label>
+          <Switch
+            id="view-toggle"
+            checked={showClientsOnly}
+            onCheckedChange={setShowClientsOnly}
+            aria-label="Toggle between clients only and all appointments"
+          />
+        </div>
       </div>
 
-      {/* Integration Health Card */}
-      <IntegrationHealthCard
-        integration={primaryIntegration}
-        lastSynced={primaryIntegrationStatus.lastSynced || lastSynced}
-        onRefresh={handleRefresh}
-        onConnect={
-          primaryIntegration === "outlook"
-            ? handleConnectOutlook
-            : primaryIntegration === "google"
-            ? handleConnectGoogle
-            : undefined
-        }
-        isSyncing={isSyncing}
-        isConnected={primaryIntegrationStatus.isConnected}
-      />
+      {/* Integration Health Cards - Show both Outlook and Google */}
+      <div className="flex flex-col gap-3 sm:flex-row">
+        {/* Outlook Calendar Integration */}
+        <IntegrationHealthCard
+          integration="outlook"
+          lastSynced={outlookIntegration.lastSynced}
+          onRefresh={() => handleRefresh("outlook")}
+          onConnect={handleConnectOutlook}
+          isSyncing={isSyncing}
+          isConnected={outlookIntegration.isConnected}
+          className="flex-1"
+        />
+
+        {/* Google Calendar Integration */}
+        <IntegrationHealthCard
+          integration="google"
+          lastSynced={googleIntegration.lastSynced}
+          onRefresh={() => handleRefresh("google")}
+          onConnect={handleConnectGoogle}
+          isSyncing={isSyncing}
+          isConnected={googleIntegration.isConnected}
+          className="flex-1"
+        />
+      </div>
 
       {/* Two Column Layout: Calendar and List */}
       {/* Mobile: Stack vertically, Tablet: Stack vertically, Desktop: Side by side (1/2 split) */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Calendar (Full width on mobile/tablet, 1 column on desktop) */}
+        {/* Always show all appointments in calendar (including calendar events) */}
         <div className="lg:col-span-1">
           <AppointmentCalendar
-            appointments={appointments || []}
+            appointments={allAppointments || []}
             appointmentSources={appointmentSources ?? undefined}
             onDateSelect={setSelectedDate}
             selectedDate={selectedDate}
@@ -261,8 +296,9 @@ function AppointmentsPageContent() {
       </div>
 
       {/* Weekly Calendar View */}
+      {/* Always show all appointments in weekly calendar (including calendar events) */}
       <WeeklyCalendarView
-        appointments={appointments || []}
+        appointments={allAppointments || []}
         appointmentSources={appointmentSources ?? undefined}
         onAppointmentClick={(apt) => {
           // Set selected date to the appointment's date

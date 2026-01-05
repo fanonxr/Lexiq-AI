@@ -133,6 +133,8 @@ services:
       - AZURE_AD_B2C_CLIENT_SECRET=${AZURE_AD_B2C_CLIENT_SECRET:-}
       - AZURE_AD_B2C_INSTANCE=${AZURE_AD_B2C_INSTANCE:-https://login.microsoftonline.com}
       - AZURE_AD_B2C_USE_B2C=${AZURE_AD_B2C_USE_B2C:-false}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       # Twilio Configuration
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
@@ -377,6 +379,177 @@ services:
       retries: 3
     networks:
       - lexiqai-network
+
+  # Integration Worker (Celery worker for calendar sync and CRM integration)
+  # Handles background job processing for calendar synchronization
+  integration-worker:
+    build:
+      context: .
+      dockerfile: docker/integration-worker/Dockerfile
+    container_name: lexiqai-integration-worker-local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api-core:
+        condition: service_started
+    environment:
+      # Service
+      SERVICE_NAME: integration-worker
+      ENVIRONMENT: development
+      # Database (shared with api-core) - use postgresql:// format (will be converted to asyncpg internally)
+      DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-lexiqai_local}
+      # Redis (Celery broker and result backend)
+      REDIS_URL: redis://redis:6379/0
+      # API Core service
+      API_CORE_URL: http://localhost:8000
+      API_CORE_API_KEY: ${API_CORE_INTERNAL_API_KEY:-}
+      # Azure AD / Microsoft Graph (same as api-core)
+      AZURE_AD_CLIENT_ID: ${AZURE_AD_B2C_CLIENT_ID:-}
+      AZURE_AD_TENANT_ID: ${AZURE_AD_B2C_TENANT_ID:-}
+      AZURE_AD_CLIENT_SECRET: ${AZURE_AD_B2C_CLIENT_SECRET:-}
+      # Google Calendar API (Phase 5)
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Webhook settings
+      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://localhost:8080}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-me-in-production}
+      # Sync settings
+      SYNC_LOOKBACK_DAYS: ${SYNC_LOOKBACK_DAYS:-30}
+      SYNC_LOOKAHEAD_DAYS: ${SYNC_LOOKAHEAD_DAYS:-90}
+      SYNC_BATCH_SIZE: ${SYNC_BATCH_SIZE:-100}
+      # Retry settings
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      RETRY_BACKOFF_SECONDS: ${RETRY_BACKOFF_SECONDS:-60}
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PYTHONPATH: /app/src:/app/api-core/src
+    command: celery -A integration_worker.celery_app worker --loglevel=info --concurrency=4
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A integration_worker.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    networks:
+      - lexiqai-network
+    restart: unless-stopped
+
+  # Integration Worker Beat (Celery scheduler for periodic tasks)
+  # Triggers scheduled tasks: calendar sync every 15 min, token refresh every hour
+  integration-worker-beat:
+    build:
+      context: .
+      dockerfile: docker/integration-worker/Dockerfile
+    container_name: lexiqai-integration-worker-beat-local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Service
+      SERVICE_NAME: integration-worker-beat
+      ENVIRONMENT: development
+      # Database (for querying integrations to sync) - use postgresql:// format (will be converted to asyncpg internally)
+      DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-lexiqai_local}
+      # Redis (Celery broker)
+      REDIS_URL: redis://redis:6379/0
+      # API Core service
+      API_CORE_URL: http://api-core:8000
+      # Azure AD / Microsoft Graph
+      AZURE_AD_CLIENT_ID: ${AZURE_AD_B2C_CLIENT_ID}
+      AZURE_AD_TENANT_ID: ${AZURE_AD_B2C_TENANT_ID}
+      AZURE_AD_CLIENT_SECRET: ${AZURE_AD_B2C_CLIENT_SECRET}
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PYTHONPATH: /app/src:/app/api-core/src
+    command: celery -A integration_worker.celery_app beat --loglevel=info
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    networks:
+      - lexiqai-network
+    restart: unless-stopped
+
+  # Integration Worker Webhook Server (FastAPI for receiving webhooks)
+  # Receives real-time notifications from Microsoft Graph, Google Calendar, etc.
+  integration-worker-webhooks:
+    build:
+      context: .
+      dockerfile: docker/integration-worker/Dockerfile
+    container_name: lexiqai-integration-worker-webhooks-local
+    ports:
+      - "8002:8002"  # Webhook server port
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # Service
+      SERVICE_NAME: integration-worker-webhooks
+      ENVIRONMENT: development
+      # Database (for webhook processing)
+      DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-lexiqai_local}
+      # Redis (Celery for queuing tasks)
+      REDIS_URL: redis://redis:6379/0
+      # API Core service
+      API_CORE_URL: http://api-core:8000
+      # Azure AD / Microsoft Graph
+      AZURE_AD_CLIENT_ID: ${AZURE_AD_B2C_CLIENT_ID}
+      AZURE_AD_TENANT_ID: ${AZURE_AD_B2C_TENANT_ID}
+      AZURE_AD_CLIENT_SECRET: ${AZURE_AD_B2C_CLIENT_SECRET}
+      # Webhook settings
+      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://localhost:8002}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-me-in-production}
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PYTHONPATH: /app/src:/app/api-core/src
+    command: uvicorn integration_worker.main:app --host 0.0.0.0 --port 8002 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    networks:
+      - lexiqai-network
+    restart: unless-stopped
+
+  # Web Frontend (Next.js 14)
+  # The unified website + dashboard
+#   web-frontend:
+#     build:
+#       context: ./apps/web-frontend
+#       dockerfile: ../../docker/web-frontend/Dockerfile
+#       args:
+#         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+#     container_name: lexiqai-web-frontend-local
+#     ports:
+#       - "3000:3000"
+#     depends_on:
+#       api-core:
+#         condition: service_started
+#     environment:
+#       # Next.js
+#       - NODE_ENV=development
+#       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+#       # Azure AD B2C (for authentication)
+#       - NEXT_PUBLIC_AZURE_AD_CLIENT_ID=${AZURE_AD_B2C_CLIENT_ID}
+#       - NEXT_PUBLIC_AZURE_AD_TENANT_ID=${AZURE_AD_B2C_TENANT_ID}
+#       - NEXT_PUBLIC_AZURE_AD_AUTHORITY=${AZURE_AD_B2C_AUTHORITY:-https://login.microsoftonline.com/${AZURE_AD_B2C_TENANT_ID}}
+#       # Feature flags
+#       - NEXT_PUBLIC_ENABLE_SIGNUP=${ENABLE_SIGNUP:-true}
+#     volumes:
+#       - ./apps/web-frontend:/app:cached
+#       - /app/node_modules
+#       - /app/.next
+#     command: npm run dev
+#     networks:
+#       - lexiqai-network
 
 volumes:
   postgres_data:
