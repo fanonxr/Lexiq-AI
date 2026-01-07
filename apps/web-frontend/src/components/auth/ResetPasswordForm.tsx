@@ -18,6 +18,7 @@ import { FormInput } from "@/components/forms/FormInput";
 import { FormButton } from "@/components/forms/FormButton";
 import { FormError } from "@/components/forms/FormError";
 import { validateForm, getFieldErrors, type ResetPasswordRequestFormData, resetPasswordRequestSchema } from "@/lib/validation/schemas";
+import { requestPasswordReset } from "@/lib/api/auth";
 import { Mail, CheckCircle2 } from "lucide-react";
 
 export function ResetPasswordForm() {
@@ -43,13 +44,7 @@ export function ResetPasswordForm() {
 
     setIsSubmitting(true);
     try {
-      // TODO: Implement password reset API call when backend is ready
-      // For now, simulate a successful request
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      
-      // With Microsoft Entra ID, password reset is typically handled by the identity provider
-      // This form could redirect to Microsoft's password reset page, or send an email
-      // For now, we'll show a success message
+      await requestPasswordReset(email);
       setIsSuccess(true);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to send reset link";

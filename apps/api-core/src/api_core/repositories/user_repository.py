@@ -60,6 +60,25 @@ class UserRepository(BaseRepository[User]):
             logger.error(f"Error getting user by Azure AD object ID {object_id}: {e}")
             raise DatabaseError("Failed to retrieve user by Azure AD object ID") from e
 
+    async def get_by_google_id(self, google_id: str) -> Optional[User]:
+        """
+        Get user by Google ID.
+
+        Args:
+            google_id: Google user ID (sub claim)
+
+        Returns:
+            User instance or None if not found
+        """
+        try:
+            result = await self.session.execute(
+                select(User).where(User.google_id == google_id)
+            )
+            return result.scalar_one_or_none()
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting user by Google ID {google_id}: {e}")
+            raise DatabaseError("Failed to retrieve user by Google ID") from e
+
     async def create_user(
         self,
         email: str,
@@ -101,6 +120,15 @@ class UserRepository(BaseRepository[User]):
                 if existing:
                     raise ConflictError(
                         f"User with Azure AD object ID {azure_ad_object_id} already exists"
+                    )
+
+            # Check if user with Google ID already exists
+            google_id = kwargs.get("google_id")
+            if google_id:
+                existing = await self.get_by_google_id(google_id)
+                if existing:
+                    raise ConflictError(
+                        f"User with Google ID {google_id} already exists"
                     )
 
             # Create user
@@ -203,6 +231,25 @@ class UserRepository(BaseRepository[User]):
             user_id, password_reset_token=None, password_reset_expires_at=None
         )
 
+    async def get_by_reset_token(self, token: str) -> Optional[User]:
+        """
+        Get user by password reset token.
+
+        Args:
+            token: Password reset token
+
+        Returns:
+            User instance or None if not found
+        """
+        try:
+            result = await self.session.execute(
+                select(User).where(User.password_reset_token == token)
+            )
+            return result.scalar_one_or_none()
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting user by reset token: {e}")
+            raise DatabaseError("Failed to retrieve user by reset token") from e
+
     async def update_last_login(self, user_id: str) -> Optional[User]:
         """
         Update user's last login timestamp.
@@ -214,6 +261,52 @@ class UserRepository(BaseRepository[User]):
             Updated user instance or None if not found
         """
         return await self.update_user(user_id, last_login_at=datetime.utcnow())
+
+    async def get_by_verification_token(self, token: str) -> Optional[User]:
+        """
+        Get user by email verification token.
+
+        Args:
+            token: Email verification token
+
+        Returns:
+            User instance or None if not found
+        """
+        try:
+            result = await self.session.execute(
+                select(User).where(User.email_verification_token == token)
+            )
+            return result.scalar_one_or_none()
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting user by verification token: {e}")
+            raise DatabaseError("Failed to retrieve user by verification token") from e
+
+    async def set_email_verification_token(
+        self, user_id: str, token: str
+    ) -> Optional[User]:
+        """
+        Set email verification token for user.
+
+        Args:
+            user_id: User ID
+            token: Verification token
+
+        Returns:
+            Updated user instance or None if not found
+        """
+        return await self.update_user(user_id, email_verification_token=token)
+
+    async def clear_email_verification_token(self, user_id: str) -> Optional[User]:
+        """
+        Clear email verification token for user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            Updated user instance or None if not found
+        """
+        return await self.update_user(user_id, email_verification_token=None)
 
     async def deactivate_user(self, user_id: str) -> Optional[User]:
         """

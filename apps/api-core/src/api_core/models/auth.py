@@ -32,6 +32,19 @@ class ResetPasswordResponse(BaseModel):
     message: str = Field(..., description="Success message")
 
 
+class ConfirmPasswordResetRequest(BaseModel):
+    """Confirm password reset request model."""
+
+    token: str = Field(..., description="Password reset token")
+    new_password: str = Field(..., min_length=8, description="New password (minimum 8 characters)")
+
+
+class ConfirmPasswordResetResponse(BaseModel):
+    """Confirm password reset response model."""
+
+    message: str = Field(..., description="Success message")
+
+
 class VerifyEmailRequest(BaseModel):
     """Email verification request model."""
 
@@ -40,6 +53,18 @@ class VerifyEmailRequest(BaseModel):
 
 class VerifyEmailResponse(BaseModel):
     """Email verification response model."""
+
+    message: str = Field(..., description="Success message")
+
+
+class ResendVerificationRequest(BaseModel):
+    """Resend verification email request model."""
+
+    email: EmailStr = Field(..., description="User email address")
+
+
+class ResendVerificationResponse(BaseModel):
+    """Resend verification email response model."""
 
     message: str = Field(..., description="Success message")
 

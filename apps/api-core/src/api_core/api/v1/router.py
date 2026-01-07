@@ -33,6 +33,7 @@ from api_core.api.v1 import (
     agent,
     appointments,
     auth,
+    auth_google,
     billing,
     calendar_integrations,
     calls,
@@ -60,6 +61,7 @@ router = APIRouter(
 # Include all v1 API sub-routers
 # Order matters for OpenAPI documentation grouping
 router.include_router(auth.router)
+router.include_router(auth_google.router)
 router.include_router(users.router)
 router.include_router(billing.router)
 router.include_router(dashboard.router)

@@ -50,10 +50,20 @@ class User(Base):
     )
     azure_ad_tenant_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
+    # Google OAuth integration
+    google_id: Mapped[Optional[str]] = mapped_column(
+        String(255), unique=True, index=True, nullable=True
+    )
+    google_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+
     # Account status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    
+    # Account lockout (for failed login attempts)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Email verification
     email_verification_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -599,7 +609,7 @@ class Firm(Base):
     )
 
     # Firm details
-    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     domain: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True, index=True)
 
     # AI Configuration

@@ -25,6 +25,10 @@ async def get_current_user_profile(
     Get current user profile.
 
     Returns the profile of the currently authenticated user.
+    Works with all authentication types:
+    - Microsoft (Azure AD B2C/Entra ID) tokens
+    - Google OAuth tokens
+    - Email/Password (internal JWT) tokens
     """
     try:
         async with get_session_context() as session:
@@ -71,6 +75,42 @@ async def get_current_user_profile(
                         except Exception as sync_error:
                             logger.warning(
                                 f"Failed to sync user on fallback: {sync_error}, "
+                                f"using existing user record"
+                            )
+                            # Continue with existing user
+            elif current_user.token_type == "google_oauth" and current_user.user_info:
+                # Fallback: If user not found by ID, try Google ID
+                # This handles cases where auto-sync failed or user_id is still Google ID
+                # user_info is a GoogleUserInfo object with a 'sub' attribute
+                google_id = getattr(current_user.user_info, "sub", None) if current_user.user_info else None
+                if google_id:
+                    logger.debug(
+                        f"User not found by ID {current_user.user_id}, "
+                        f"trying Google ID: {google_id}"
+                    )
+                    db_user = await user_service.repository.get_by_google_id(google_id)
+                    
+                    if db_user:
+                        # User found by Google ID - sync might have failed earlier
+                        # Try to sync again to ensure user is up to date
+                        try:
+                            email = current_user.email
+                            name = current_user.claims.get("name", email.split("@")[0])
+                            google_email = current_user.claims.get("email", email)
+                            
+                            user_profile = await user_service.sync_user_from_google(
+                                google_id=google_id,
+                                email=email,
+                                name=name,
+                                google_email=google_email,
+                            )
+                            db_user = await user_service.repository.get_by_id(user_profile.id)
+                            logger.info(
+                                f"Successfully synced Google user on fallback: {user_profile.id}"
+                            )
+                        except Exception as sync_error:
+                            logger.warning(
+                                f"Failed to sync Google user on fallback: {sync_error}, "
                                 f"using existing user record"
                             )
                             # Continue with existing user

@@ -35,7 +35,7 @@ voice-gateway-vendor: ## Vendor voice-gateway dependencies
 	@echo "Vendoring Voice Gateway dependencies..."
 	cd apps/voice-gateway && go mod vendor
 
-.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-voice-gateway docker-build-no-cache install test format lint terraform-init terraform-plan terraform-apply terraform-destroy frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check voice-deps voice-build voice-run voice-test voice-test-cov voice-fmt voice-vet voice-lint voice-check voice-clean voice-health proto-compile proto-compile-go proto-clean-go
+.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-voice-gateway docker-build-no-cache install test format lint terraform-init terraform-plan terraform-apply terraform-destroy frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp db-reset db-reset-local orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check voice-deps voice-build voice-run voice-test voice-test-cov voice-fmt voice-vet voice-lint voice-check voice-clean voice-health proto-compile proto-compile-go proto-clean-go
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -209,7 +209,7 @@ api-venv-install: ## Install dependencies in virtual environment
 	fi
 	@echo "Installing dependencies..."
 	cd apps/api-core && .venv/bin/python -m pip install --upgrade pip
-	cd apps/api-core && .venv/bin/python -m pip install -r requirements.txt
+	cd apps/api-core && .venv/bin/python -m pip install -r requirements-dev.txt
 	@echo "✓ Dependencies installed"
 
 api-venv-activate: ## Show instructions to activate virtual environment
@@ -285,7 +285,7 @@ migrate-up-local: ## Apply migrations to local Docker PostgreSQL
 	@echo "Applying migrations to local Docker PostgreSQL..."
 	cd apps/api-core && DATABASE_URL="postgresql://admin:password@localhost:5432/lexiqai_local" $(ALEMBIC_CMD) upgrade head
 
-migrate-up-docker: ## Apply migrations from inside Docker container
+migrate-up-docker: ## Apply migratiorns from inside Docker container
 	@echo "Applying migrations from inside Docker container..."
 	$(DOCKER_COMPOSE) exec api-core bash -c "cd /app && alembic upgrade head"
 
@@ -346,6 +346,26 @@ migrate-stamp: ## Mark database as being at a specific revision (usage: make mig
 		exit 1; \
 	fi
 	cd apps/api-core && $(ALEMBIC_CMD) stamp $(REVISION)
+
+db-reset: ## Reset database by deleting all rows (keeps schema intact)
+	@if [ ! -f "$(VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make api-venv-setup && make api-venv-install' first"; \
+		exit 1; \
+	fi
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "⚠️  DATABASE_URL not set. Using local Docker default..."; \
+		cd apps/api-core && DATABASE_URL="postgresql://admin:password@localhost:5432/lexiqai_local" .venv/bin/python ../../tools/scripts/reset_database.py; \
+	else \
+		cd apps/api-core && .venv/bin/python ../../tools/scripts/reset_database.py; \
+	fi
+
+db-reset-local: ## Reset local Docker database (deletes all rows, keeps schema)
+	@if [ ! -f "$(VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make api-venv-setup && make api-venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Resetting local Docker database..."
+	cd apps/api-core && DATABASE_URL="postgresql://admin:password@localhost:5432/lexiqai_local" .venv/bin/python ../../tools/scripts/reset_database.py
 
 # Cognitive Orchestrator commands
 # Virtual environment paths
