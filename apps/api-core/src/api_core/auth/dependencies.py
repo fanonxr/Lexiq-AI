@@ -60,9 +60,9 @@ async def get_current_user(
     """
     FastAPI dependency to get the current authenticated user.
 
-    Validates the token (either Azure AD B2C/Entra ID or internal JWT) and returns
-    the user information. For Azure AD users, automatically syncs the user to the
-    database if they don't exist yet.
+    Validates the token (Azure AD B2C/Entra ID, Google OAuth, or internal JWT) and returns
+    the user information. For Azure AD and Google OAuth users, automatically syncs the user
+    to the database if they don't exist yet.
 
     Raises:
         HTTPException: 401 if token is missing or invalid
@@ -150,6 +150,70 @@ async def get_current_user(
                 # Continue with Azure AD object ID as user_id
                 # The user will be synced on next request or can be manually synced
                 # The /users/me endpoint has a fallback to handle this case
+        
+        # Auto-sync Google OAuth users to database
+        if result.token_type == "google_oauth" and result.user_info:
+            try:
+                from api_core.auth.google_oauth import GoogleUserInfo
+                
+                # Type check to ensure it's GoogleUserInfo
+                if isinstance(result.user_info, GoogleUserInfo):
+                    async with get_session_context() as session:
+                        user_service = get_user_service(session)
+                        
+                        # Check if user exists in database by Google ID
+                        google_id = result.user_info.sub
+                        if google_id:
+                            existing_user = await user_service.repository.get_by_google_id(google_id)
+                            
+                            if not existing_user:
+                                # User doesn't exist in database, sync them
+                                logger.info(
+                                    f"Auto-syncing Google user to database: {result.email} "
+                                    f"(google_id: {google_id})"
+                                )
+                                
+                                # Extract user info from token
+                                email = result.user_info.email or result.email
+                                name = result.user_info.name or result.user_info.given_name or email.split("@")[0]
+                                
+                                # Sync user from Google
+                                user_profile = await user_service.sync_user_from_google(
+                                    google_id=google_id,
+                                    email=email,
+                                    name=name,
+                                    google_email=result.user_info.email,
+                                    picture=result.user_info.picture,
+                                    given_name=result.user_info.given_name,
+                                    family_name=result.user_info.family_name,
+                                )
+                                
+                                # Update result to use database user ID instead of Google ID
+                                # This ensures subsequent lookups work correctly
+                                result.user_id = user_profile.id
+                                logger.info(
+                                    f"Successfully synced Google user to database: "
+                                    f"{user_profile.id} (was: {google_id})"
+                                )
+                            else:
+                                # User exists, update result to use database user ID
+                                result.user_id = existing_user.id
+                                logger.debug(
+                                    f"Google user already exists in database: {existing_user.id}"
+                                )
+            except Exception as sync_error:
+                # Log the error but don't fail authentication
+                # The user is still authenticated, just not synced to DB
+                logger.error(
+                    f"Failed to auto-sync Google user to database: {sync_error}",
+                    exc_info=True,
+                )
+                logger.error(
+                    f"Auto-sync error details - user_id: {result.user_id}, "
+                    f"email: {result.email}, google_id: {result.user_info.sub if result.user_info else 'N/A'}"
+                )
+                # Continue with Google ID as user_id
+                # The user will be synced on next request or can be manually synced
         
         return result
     except AuthenticationError as e:
@@ -445,6 +509,55 @@ async def get_user_or_internal_auth(
             except Exception as sync_error:
                 logger.error(
                     f"Failed to auto-sync Azure AD user to database: {sync_error}",
+                    exc_info=True,
+                )
+        
+        # Auto-sync Google OAuth users to database (same logic as get_current_user)
+        if result.token_type == "google_oauth" and result.user_info:
+            try:
+                from api_core.auth.google_oauth import GoogleUserInfo
+                
+                # Type check to ensure it's GoogleUserInfo
+                if isinstance(result.user_info, GoogleUserInfo):
+                    async with get_session_context() as session:
+                        user_service = get_user_service(session)
+                        
+                        google_id = result.user_info.sub
+                        if google_id:
+                            existing_user = await user_service.repository.get_by_google_id(google_id)
+                            
+                            if not existing_user:
+                                logger.info(
+                                    f"Auto-syncing Google user to database: {result.email} "
+                                    f"(google_id: {google_id})"
+                                )
+                                
+                                email = result.user_info.email or result.email
+                                name = result.user_info.name or result.user_info.given_name or email.split("@")[0]
+                                
+                                user_profile = await user_service.sync_user_from_google(
+                                    google_id=google_id,
+                                    email=email,
+                                    name=name,
+                                    google_email=result.user_info.email,
+                                    picture=result.user_info.picture,
+                                    given_name=result.user_info.given_name,
+                                    family_name=result.user_info.family_name,
+                                )
+                                
+                                result.user_id = user_profile.id
+                                logger.info(
+                                    f"Successfully synced Google user to database: "
+                                    f"{user_profile.id} (was: {google_id})"
+                                )
+                            else:
+                                result.user_id = existing_user.id
+                                logger.debug(
+                                    f"Google user already exists in database: {existing_user.id}"
+                                )
+            except Exception as sync_error:
+                logger.error(
+                    f"Failed to auto-sync Google user to database: {sync_error}",
                     exc_info=True,
                 )
         

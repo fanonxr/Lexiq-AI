@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { getEnv } from "@/lib/config/browser/env";
+import { initiateGoogleAuth } from "@/lib/api/auth";
 import { FormInput } from "@/components/forms/FormInput";
 import { FormButton } from "@/components/forms/FormButton";
 import { FormError } from "@/components/forms/FormError";
@@ -81,9 +82,32 @@ export function SignupForm() {
 
   // Handle Google sign-up (if enabled)
   const handleGoogleSignup = async () => {
-    // Note: Google sign-up would need additional configuration
-    // For now, we'll show a message that it's not yet implemented
-    setFormError("Google sign-up is not yet configured. Please use Microsoft sign-up.");
+    try {
+      clearError();
+      setFormError(null);
+      setIsSubmitting(true);
+      
+      // Get redirect URI from environment
+      const redirectUri = env.googleOAuth.redirectUri;
+      
+      // Initiate Google OAuth flow and get authorization URL
+      const authUrl = await initiateGoogleAuth(redirectUri);
+      
+      // Redirect to Google OAuth page
+      if (authUrl) {
+        window.location.href = authUrl;
+      } else {
+        throw new Error("No authorization URL received from server");
+      }
+      
+      // Note: User will be redirected to Google, then back to /auth/google/callback
+      // The callback page will handle the rest (sign-up or sign-in)
+      // We don't reset isSubmitting here because we're redirecting away
+    } catch (error) {
+      setIsSubmitting(false);
+      const errorMessage = error instanceof Error ? error.message : "Failed to sign up with Google";
+      setFormError(errorMessage);
+    }
   };
 
   // Handle email/password form submission

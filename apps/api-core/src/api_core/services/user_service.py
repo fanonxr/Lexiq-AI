@@ -7,7 +7,8 @@ from typing import Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_core.database.models import User
-from api_core.exceptions import NotFoundError, ValidationError
+from api_core.exceptions import ConflictError, NotFoundError, ValidationError
+from sqlalchemy.exc import IntegrityError
 from api_core.models.auth import UserProfile
 from api_core.repositories.user_repository import UserRepository
 
@@ -24,6 +25,7 @@ class UserService:
         Args:
             session: Database session
         """
+        self.session = session
         self.repository = UserRepository(session)
 
     def _user_to_profile(self, user: User) -> UserProfile:
@@ -236,6 +238,21 @@ class UserService:
             return None
         return self._user_to_profile(user)
 
+    async def get_user_by_google_id(self, google_id: str) -> Optional[UserProfile]:
+        """
+        Get user by Google ID.
+
+        Args:
+            google_id: Google user ID (sub claim)
+
+        Returns:
+            User profile or None if not found
+        """
+        user = await self.repository.get_by_google_id(google_id)
+        if not user:
+            return None
+        return self._user_to_profile(user)
+
     async def update_user_profile(
         self, user_id: str, profile_data: Dict[str, any]
     ) -> UserProfile:
@@ -409,23 +426,42 @@ class UserService:
                 "azure_ad_tenant_id": azure_ad_tenant_id,
                 "is_verified": True,  # Azure AD users are pre-verified
             }
-            update_data.update(kwargs)
+            # Update given_name and family_name if provided
+            if "given_name" in kwargs:
+                update_data["given_name"] = kwargs["given_name"]
+            if "family_name" in kwargs:
+                update_data["family_name"] = kwargs["family_name"]
+            # Add other kwargs (excluding already handled fields)
+            for key, value in kwargs.items():
+                if key not in ["given_name", "family_name", "firm_id"]:
+                    update_data[key] = value
 
             user = await self.repository.update_user(existing_user.id, **update_data)
             logger.info(f"Synced existing user from Azure AD: {user.id}")
             return self._user_to_profile(user)
         else:
-            # Check if user exists by email (might be email/password user)
+            # Check if user exists by email (might be email/password user, Google user, etc.)
             existing_by_email = await self.repository.get_by_email(email)
             if existing_by_email:
                 # Link Azure AD to existing user
+                # Preserve existing provider IDs (don't overwrite Google ID if present)
+                update_data = {
+                    "azure_ad_object_id": azure_ad_object_id,
+                    "azure_ad_tenant_id": azure_ad_tenant_id,
+                    "is_verified": True,  # Azure AD users are pre-verified
+                }
+                # Update name if provided and different
+                if name and name != existing_by_email.name:
+                    update_data["name"] = name
+                
                 user = await self.repository.update_user(
                     existing_by_email.id,
-                    azure_ad_object_id=azure_ad_object_id,
-                    azure_ad_tenant_id=azure_ad_tenant_id,
-                    is_verified=True,
+                    **update_data,
                 )
-                logger.info(f"Linked Azure AD to existing user: {user.id}")
+                logger.info(
+                    f"Linked Azure AD to existing user: {user.id} "
+                    f"(email: {email}, had_google: {bool(user.google_id)}, had_password: {bool(user.hashed_password)})"
+                )
                 return self._user_to_profile(user)
             else:
                 # Create new user from Azure AD
@@ -442,17 +478,196 @@ class UserService:
                     firm_id = firm.id
                     logger.info(f"Created firm {firm_id} for new Azure AD user {email}")
                 
-                user = await self.repository.create_user(
-                    email=email,
-                    name=name,
-                    azure_ad_object_id=azure_ad_object_id,
-                    azure_ad_tenant_id=azure_ad_tenant_id,
-                    is_verified=True,  # Azure AD users are pre-verified
-                    firm_id=firm_id,  # Set firm_id
-                    **{k: v for k, v in kwargs.items() if k != "firm_id"},  # Exclude firm_id from kwargs
-                )
+                # Prepare user creation data
+                create_data = {
+                    "email": email,
+                    "name": name,
+                    "azure_ad_object_id": azure_ad_object_id,
+                    "azure_ad_tenant_id": azure_ad_tenant_id,
+                    "is_verified": True,  # Azure AD users are pre-verified
+                    "firm_id": firm_id,
+                }
+                # Add given_name and family_name if provided
+                if "given_name" in kwargs:
+                    create_data["given_name"] = kwargs["given_name"]
+                if "family_name" in kwargs:
+                    create_data["family_name"] = kwargs["family_name"]
+                # Add other kwargs (excluding firm_id)
+                for key, value in kwargs.items():
+                    if key not in ["given_name", "family_name", "firm_id"]:
+                        create_data[key] = value
+                
+                user = await self.repository.create_user(**create_data)
                 logger.info(f"Created new user from Azure AD: {user.id} with firm_id: {firm_id}")
                 return self._user_to_profile(user)
+
+    async def sync_user_from_google(
+        self,
+        google_id: str,
+        email: str,
+        name: str,
+        google_email: Optional[str] = None,
+        picture: Optional[str] = None,
+        **kwargs,
+    ) -> UserProfile:
+        """
+        Sync or create user from Google OAuth.
+
+        This method is called when a user authenticates with Google.
+        It will create the user if they don't exist, or update their information
+        if they do exist.
+
+        Args:
+            google_id: Google user ID (sub claim)
+            email: User email address (primary email)
+            name: User full name
+            google_email: Google-specific email (may differ from primary email)
+            picture: User profile picture URL
+            **kwargs: Additional user fields from Google
+
+        Returns:
+            User profile (created or updated)
+        """
+        # Check if user exists by Google ID
+        existing_user = await self.repository.get_by_google_id(google_id)
+
+        if existing_user:
+            # Update existing user
+            update_data = {
+                "email": email,
+                "name": name,
+                "google_email": google_email or email,
+                "is_verified": True,  # Google users are pre-verified
+            }
+            # Update given_name and family_name if provided
+            if "given_name" in kwargs:
+                update_data["given_name"] = kwargs["given_name"]
+            if "family_name" in kwargs:
+                update_data["family_name"] = kwargs["family_name"]
+            # Store picture in metadata_json if we have that field
+            # For now, we'll just update the basic fields
+            if picture:
+                # TODO: Store picture URL in metadata_json or add picture field to User model
+                pass
+            # Add other kwargs (excluding already handled fields)
+            for key, value in kwargs.items():
+                if key not in ["given_name", "family_name", "picture", "firm_id"]:
+                    update_data[key] = value
+
+            user = await self.repository.update_user(existing_user.id, **update_data)
+            logger.info(f"Synced existing user from Google: {user.id}")
+            return self._user_to_profile(user)
+        else:
+            # Check if user exists by email (might be email/password user, Azure AD user, etc.)
+            existing_by_email = await self.repository.get_by_email(email)
+            if existing_by_email:
+                # Link Google to existing user
+                # Preserve existing provider IDs (don't overwrite Azure AD ID if present)
+                update_data = {
+                    "google_id": google_id,
+                    "google_email": google_email or email,
+                    "is_verified": True,  # Google users are pre-verified
+                }
+                # Update name if provided and different
+                if name and name != existing_by_email.name:
+                    update_data["name"] = name
+                
+                user = await self.repository.update_user(
+                    existing_by_email.id,
+                    **update_data,
+                )
+                logger.info(
+                    f"Linked Google to existing user: {user.id} "
+                    f"(email: {email}, had_azure_ad: {bool(user.azure_ad_object_id)}, had_password: {bool(user.hashed_password)})"
+                )
+                return self._user_to_profile(user)
+            else:
+                # Create new user from Google
+                # Create a firm for the user if they don't have one
+                firm_id = kwargs.get("firm_id")
+                if not firm_id:
+                    from api_core.repositories.firms_repository import FirmsRepository
+                    firms_repo = FirmsRepository(self.session)
+                    
+                    # Create a firm for the user
+                    firm = await firms_repo.create(
+                        name=f"{name}'s Firm",  # Default firm name
+                    )
+                    firm_id = firm.id
+                    logger.info(f"Created firm {firm_id} for new Google user {email}")
+                
+                # Prepare user creation data
+                create_data = {
+                    "email": email,
+                    "name": name,
+                    "google_id": google_id,
+                    "google_email": google_email or email,
+                    "is_verified": True,  # Google users are pre-verified
+                    "firm_id": firm_id,
+                }
+                # Add given_name and family_name if provided
+                if "given_name" in kwargs:
+                    create_data["given_name"] = kwargs["given_name"]
+                if "family_name" in kwargs:
+                    create_data["family_name"] = kwargs["family_name"]
+                # Add other kwargs (excluding firm_id)
+                for key, value in kwargs.items():
+                    if key not in ["given_name", "family_name", "picture", "firm_id"]:
+                        create_data[key] = value
+                
+                try:
+                    user = await self.repository.create_user(**create_data)
+                    logger.info(f"Created new user from Google: {user.id} with firm_id: {firm_id}")
+                    return self._user_to_profile(user)
+                except (ConflictError, IntegrityError) as e:
+                    # User was created between our check and create attempt (race condition)
+                    # Or email normalization issue - try to find and link the existing user
+                    logger.warning(
+                        f"User creation failed due to conflict/integrity error, attempting to find existing user. "
+                        f"Error: {type(e).__name__}: {str(e)}"
+                    )
+                    
+                    # Re-check for existing user by email (case-insensitive, normalized)
+                    existing_by_email = await self.repository.get_by_email(email)
+                    if existing_by_email:
+                        # Link Google to existing user
+                        update_data = {
+                            "google_id": google_id,
+                            "google_email": google_email or email,
+                            "is_verified": True,
+                        }
+                        # Update name if provided and different
+                        if name and name != existing_by_email.name:
+                            update_data["name"] = name
+                        
+                        user = await self.repository.update_user(
+                            existing_by_email.id,
+                            **update_data,
+                        )
+                        logger.info(
+                            f"Linked Google to existing user after conflict: {user.id} "
+                            f"(email: {email})"
+                        )
+                        return self._user_to_profile(user)
+                    
+                    # Re-check by Google ID in case it was created
+                    existing_by_google = await self.repository.get_by_google_id(google_id)
+                    if existing_by_google:
+                        logger.info(
+                            f"Found existing user by Google ID after conflict: {existing_by_google.id}"
+                        )
+                        return self._user_to_profile(existing_by_google)
+                    
+                    # If still not found, log the error and re-raise
+                    logger.error(
+                        f"Could not find existing user after conflict error. "
+                        f"Email: {email}, Google ID: {google_id}, Error: {e}",
+                        exc_info=True
+                    )
+                    raise ConflictError(
+                        f"User with email {email} or Google ID {google_id} already exists, "
+                        f"but could not be found. This may indicate a database consistency issue."
+                    ) from e
 
     async def update_last_login(self, user_id: str) -> None:
         """

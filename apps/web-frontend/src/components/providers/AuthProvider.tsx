@@ -92,18 +92,29 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
     let isMounted = true;
     
     // Check if we're coming from a redirect (has hash or code in URL)
+    // Note: Google OAuth uses ?code= in query params, MSAL uses hash fragments
     const hasRedirectParams = typeof window !== "undefined" && (
       window.location.hash.includes("code") ||
       window.location.hash.includes("id_token") ||
       window.location.search.includes("code")
     );
     
+    // Check if this is a Google OAuth callback (has code in query params but not in hash)
+    const isGoogleOAuthCallback = typeof window !== "undefined" && 
+      window.location.search.includes("code") && 
+      !window.location.hash.includes("code");
+    
     if (hasRedirectParams) {
-      logger.debug("Detected redirect callback, processing...");
+      logger.debug("Detected redirect callback, processing...", {
+        isGoogleOAuth: isGoogleOAuthCallback,
+        hasHash: !!window.location.hash,
+        hasSearch: !!window.location.search,
+      });
     }
     
     // Handle redirect promise on mount
     // This processes the authentication result after redirect from Microsoft
+    // For Google OAuth, this will resolve with null (no MSAL redirect)
     instance
       .handleRedirectPromise()
       .then((response) => {
@@ -112,7 +123,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         setIsProcessingRedirect(false);
         
         if (response) {
-          // Redirect was successful
+          // Redirect was successful (MSAL)
           logger.debug("MSAL redirect handled successfully", {
             account: response.account?.username,
             hasAccessToken: !!response.accessToken,
@@ -122,8 +133,13 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
           setError(null);
         } else {
           // No redirect response - this is normal if user didn't come from a redirect
+          // OR if it's a Google OAuth callback (which doesn't use MSAL)
           setIsProcessingRedirect(false);
-          logger.debug("MSAL handleRedirectPromise: No redirect response (normal)");
+          if (isGoogleOAuthCallback) {
+            logger.debug("Google OAuth callback detected - MSAL handleRedirectPromise returned null (expected)");
+          } else {
+            logger.debug("MSAL handleRedirectPromise: No redirect response (normal)");
+          }
         }
       })
       .catch((err) => {
@@ -134,11 +150,15 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         // Redirect failed or was cancelled
         const error = err instanceof Error ? err : new Error("Authentication redirect failed");
         logger.error("MSAL redirect error", error);
-        setError(error);
+        // Don't set error for Google OAuth callbacks - they don't use MSAL
+        if (!isGoogleOAuthCallback) {
+          setError(error);
+        }
       });
     
     // If no redirect params, we're not processing a redirect
-    if (!hasRedirectParams) {
+    // Also, if it's a Google OAuth callback, we should check for tokens immediately
+    if (!hasRedirectParams || isGoogleOAuthCallback) {
       setIsProcessingRedirect(false);
     }
     
@@ -166,87 +186,170 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
 
   /**
    * Get access token for API calls
-   * Defined early so it can be used in other hooks
+   * 
+   * Unified token getter that handles all three authentication types:
+   * 1. Microsoft (MSAL) - Returns Azure AD token
+   * 2. Google OAuth - Returns internal JWT token from sessionStorage
+   * 3. Email/Password - Returns internal JWT token from sessionStorage
+   * 
+   * Priority:
+   * 1. If MSAL account exists, get token from MSAL
+   * 2. Otherwise, check sessionStorage for internal JWT token (Google or Email/Password)
    * 
    * Note: For backend API calls, we don't pass scopes - tokenRequest()
    * will use the backend's client ID as the scope automatically.
    */
   const getAccessToken = useCallback(
     async (scopes?: string[]): Promise<string | null> => {
-      if (!account) {
-        return null;
-      }
-
-      // If token acquisition is already in progress, wait for it to complete
-      // instead of returning null immediately (prevents race conditions)
-      if (isAcquiringToken) {
-        logger.debug("Token acquisition already in progress, waiting...");
-        // Wait up to 5 seconds for the current acquisition to complete
-        let waitCount = 0;
-        const maxWait = 50; // 50 * 100ms = 5 seconds
-        while (isAcquiringToken && waitCount < maxWait) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          waitCount++;
-        }
-        // If still acquiring after waiting, proceed with new request
+      // Priority 1: Microsoft (MSAL) authentication
+      if (account) {
+        // If token acquisition is already in progress, wait for it to complete
+        // instead of returning null immediately (prevents race conditions)
         if (isAcquiringToken) {
-          logger.warn("Token acquisition still in progress after waiting, proceeding anyway...");
-        }
-      }
-
-      try {
-        setIsAcquiringToken(true);
-        setError(null);
-        
-        // Request token for backend API (no scopes = uses backend client ID)
-        const request = tokenRequest(scopes);
-        
-        logger.debug("Requesting token", {
-          scopes: request.scopes,
-          accountId: account?.homeAccountId,
-          forceRefresh: request.forceRefresh,
-        });
-        
-        const response: AuthenticationResult | null =
-          await instance.acquireTokenSilent({
-            ...request,
-            account: account,
-          });
-
-        if (response) {
-          logger.debug("Token acquired successfully", {
-            hasToken: !!response.accessToken,
-            tokenLength: response.accessToken?.length || 0,
-            scopes: response.scopes,
-          });
+          logger.debug("Token acquisition already in progress, waiting...");
+          // Wait up to 5 seconds for the current acquisition to complete
+          let waitCount = 0;
+          const maxWait = 50; // 50 * 100ms = 5 seconds
+          while (isAcquiringToken && waitCount < maxWait) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            waitCount++;
+          }
+          // If still acquiring after waiting, proceed with new request
+          if (isAcquiringToken) {
+            logger.warn("Token acquisition still in progress after waiting, proceeding anyway...");
+          }
         }
 
-        setIsAcquiringToken(false);
-        return response?.accessToken || null;
-      } catch (err: any) {
-        // Check if this is a consent error
-        const isConsentError = err?.errorCode === "consent_required" || 
-                              err?.errorCode === "interaction_required" ||
-                              err?.message?.includes("consent") ||
-                              err?.message?.includes("AADSTS65001");
+        try {
+          setIsAcquiringToken(true);
+          setError(null);
+          
+          // Request token for backend API (no scopes = uses backend client ID)
+          const request = tokenRequest(scopes);
+          
+          logger.debug("Requesting MSAL token", {
+            scopes: request.scopes,
+            accountId: account?.homeAccountId,
+            forceRefresh: request.forceRefresh,
+          });
+          
+          const response: AuthenticationResult | null =
+            await instance.acquireTokenSilent({
+              ...request,
+              account: account,
+            });
 
-        // Check if this is an iframe timeout error
-        const isIframeTimeout = err?.errorCode === "monitor_window_timeout" ||
-                                err?.message?.includes("monitor_window_timeout") ||
-                                err?.message?.includes("iframe") ||
-                                err?.message?.includes("Token acquisition in iframe failed");
+          if (response) {
+            logger.debug("MSAL token acquired successfully", {
+              hasToken: !!response.accessToken,
+              tokenLength: response.accessToken?.length || 0,
+              scopes: response.scopes,
+            });
+          }
 
-        logger.warn("Silent token acquisition failed", {
-          errorCode: err?.errorCode,
-          errorMessage: err?.message,
-          isConsentError,
-          isIframeTimeout,
-        });
+          setIsAcquiringToken(false);
+          return response?.accessToken || null;
+        } catch (err: any) {
+          // Check if this is a consent error
+          const isConsentError = err?.errorCode === "consent_required" || 
+                                err?.errorCode === "interaction_required" ||
+                                err?.message?.includes("consent") ||
+                                err?.message?.includes("AADSTS65001");
 
-        // If iframe timeout, try interactive popup immediately (don't wait for consent check)
-        if (isIframeTimeout) {
-          logger.debug("Iframe timeout detected, trying interactive popup...");
+          // Check if this is an iframe timeout error
+          const isIframeTimeout = err?.errorCode === "monitor_window_timeout" ||
+                                  err?.message?.includes("monitor_window_timeout") ||
+                                  err?.message?.includes("iframe") ||
+                                  err?.message?.includes("Token acquisition in iframe failed");
+
+          logger.warn("Silent token acquisition failed", {
+            errorCode: err?.errorCode,
+            errorMessage: err?.message,
+            isConsentError,
+            isIframeTimeout,
+          });
+
+          // If iframe timeout, try interactive popup immediately (don't wait for consent check)
+          if (isIframeTimeout) {
+            logger.debug("Iframe timeout detected, trying interactive popup...");
+            try {
+              const request = tokenRequest(scopes);
+              const response: AuthenticationResult | null =
+                await instance.acquireTokenPopup({
+                  ...request,
+                  account: account,
+                });
+
+              if (response?.accessToken) {
+                setIsAcquiringToken(false);
+                logger.debug("Interactive popup succeeded after iframe timeout");
+                return response.accessToken;
+              }
+            } catch (popupErr: any) {
+              logger.warn("Interactive popup failed after iframe timeout", {
+                errorCode: popupErr?.errorCode,
+                errorMessage: popupErr?.message,
+              });
+              // Continue to consent error handling below
+            }
+          }
+
+          // If it's a consent error, we need admin consent in Azure Portal
+          // However, for same app registration, we might need to expose an API first
+          // Try interactive popup once to see if user consent helps, but don't loop
+          if (isConsentError) {
+            // Check if we've already tried interactive - if so, don't try again
+            const hasTriedInteractive = sessionStorage.getItem("auth_consent_tried") === "true";
+            
+            if (!hasTriedInteractive) {
+              // Mark that we've tried interactive
+              sessionStorage.setItem("auth_consent_tried", "true");
+              
+              // Try interactive popup once
+              try {
+                logger.debug("Consent error detected, trying interactive popup once...");
+                
+                const request = tokenRequest(scopes);
+                const response: AuthenticationResult | null =
+                  await instance.acquireTokenPopup({
+                    ...request,
+                    account: account,
+                    prompt: "consent", // Force consent prompt
+                  });
+
+                // If successful, clear the flag
+                if (response?.accessToken) {
+                  sessionStorage.removeItem("auth_consent_tried");
+                  setIsAcquiringToken(false);
+                  return response.accessToken;
+                }
+              } catch (popupErr) {
+                // Popup failed, continue to show error
+                logger.warn("Interactive popup also failed", {
+                  error: popupErr instanceof Error ? popupErr.message : String(popupErr),
+                });
+              }
+            }
+            
+            // Show error message
+            setIsAcquiringToken(false);
+            const error = new Error(
+              "Consent is required. If you've already granted admin consent, you may need to:\n" +
+              "1. Expose an API in Azure Portal (App registrations → Expose an API)\n" +
+              "2. Set Application ID URI to: api://1fabcd74-ddc8-45ae-a7ed-fe017ae6b5ce\n" +
+              "3. Grant admin consent again\n" +
+              "4. Wait 1-2 minutes for changes to propagate\n" +
+              "See /docs/connection/AZURE_AD_SETUP.md for detailed instructions."
+            );
+            setError(error);
+            logger.error("Consent required - check Azure Portal configuration", error);
+            return null;
+          }
+
+          // For other errors, try interactive popup (but only once)
           try {
+            logger.debug("Attempting interactive token acquisition...");
+            
             const request = tokenRequest(scopes);
             const response: AuthenticationResult | null =
               await instance.acquireTokenPopup({
@@ -254,236 +357,124 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
                 account: account,
               });
 
-            if (response?.accessToken) {
-              setIsAcquiringToken(false);
-              logger.debug("Interactive popup succeeded after iframe timeout");
-              return response.accessToken;
-            }
-          } catch (popupErr: any) {
-            logger.warn("Interactive popup failed after iframe timeout", {
-              errorCode: popupErr?.errorCode,
-              errorMessage: popupErr?.message,
-            });
-            // Continue to consent error handling below
-          }
-        }
-
-        // If it's a consent error, we need admin consent in Azure Portal
-        // However, for same app registration, we might need to expose an API first
-        // Try interactive popup once to see if user consent helps, but don't loop
-        if (isConsentError) {
-          // Check if we've already tried interactive - if so, don't try again
-          const hasTriedInteractive = sessionStorage.getItem("auth_consent_tried") === "true";
-          
-          if (!hasTriedInteractive) {
-            // Mark that we've tried interactive
-            sessionStorage.setItem("auth_consent_tried", "true");
+            setIsAcquiringToken(false);
+            return response?.accessToken || null;
+          } catch (interactiveErr: any) {
+            setIsAcquiringToken(false);
             
-            // Try interactive popup once
-            try {
-              logger.debug("Consent error detected, trying interactive popup once...");
-              
-              const request = tokenRequest(scopes);
-              const response: AuthenticationResult | null =
-                await instance.acquireTokenPopup({
-                  ...request,
-                  account: account,
-                  prompt: "consent", // Force consent prompt
-                });
+            // Check if this is also a consent error
+            const isInteractiveConsentError = interactiveErr?.errorCode === "consent_required" || 
+                                              interactiveErr?.errorCode === "interaction_required" ||
+                                              interactiveErr?.message?.includes("consent") ||
+                                              interactiveErr?.message?.includes("AADSTS65001");
 
-              // If successful, clear the flag
-              if (response?.accessToken) {
-                sessionStorage.removeItem("auth_consent_tried");
-                setIsAcquiringToken(false);
-                return response.accessToken;
-              }
-            } catch (popupErr) {
-              // Popup failed, continue to show error
-              logger.warn("Interactive popup also failed", {
-                error: popupErr instanceof Error ? popupErr.message : String(popupErr),
-              });
+            if (isInteractiveConsentError) {
+              const error = new Error(
+                "Admin consent is required. Please ask your administrator to grant consent in Azure Portal. " +
+                "See /docs/connection/GRANT_CONSENT_QUICK.md for instructions."
+              );
+              setError(error);
+              logger.error("Consent required after interactive attempt", error);
+              return null;
             }
-          }
-          
-          // Show error message
-          setIsAcquiringToken(false);
-          const error = new Error(
-            "Consent is required. If you've already granted admin consent, you may need to:\n" +
-            "1. Expose an API in Azure Portal (App registrations → Expose an API)\n" +
-            "2. Set Application ID URI to: api://1fabcd74-ddc8-45ae-a7ed-fe017ae6b5ce\n" +
-            "3. Grant admin consent again\n" +
-            "4. Wait 1-2 minutes for changes to propagate\n" +
-            "See /docs/connection/AZURE_AD_SETUP.md for detailed instructions."
-          );
-          setError(error);
-          logger.error("Consent required - check Azure Portal configuration", error);
-          return null;
-        }
 
-        // For other errors, try interactive popup (but only once)
-        try {
-          logger.debug("Attempting interactive token acquisition...");
-          
-          const request = tokenRequest(scopes);
-          const response: AuthenticationResult | null =
-            await instance.acquireTokenPopup({
-              ...request,
-              account: account,
-            });
-
-          setIsAcquiringToken(false);
-          return response?.accessToken || null;
-        } catch (interactiveErr: any) {
-          setIsAcquiringToken(false);
-          
-          // Check if this is also a consent error
-          const isInteractiveConsentError = interactiveErr?.errorCode === "consent_required" || 
-                                            interactiveErr?.errorCode === "interaction_required" ||
-                                            interactiveErr?.message?.includes("consent") ||
-                                            interactiveErr?.message?.includes("AADSTS65001");
-
-          if (isInteractiveConsentError) {
-            const error = new Error(
-              "Admin consent is required. Please ask your administrator to grant consent in Azure Portal. " +
-              "See /docs/connection/GRANT_CONSENT_QUICK.md for instructions."
-            );
+            const error =
+              interactiveErr instanceof Error
+                ? interactiveErr
+                : new Error("Failed to acquire token");
             setError(error);
-            logger.error("Consent required after interactive attempt", error);
+            logger.error("Interactive token acquisition failed", error);
             return null;
           }
-
-          const error =
-            interactiveErr instanceof Error
-              ? interactiveErr
-              : new Error("Failed to acquire token");
-          setError(error);
-          logger.error("Interactive token acquisition failed", error);
-          return null;
         }
       }
+
+      // Priority 2: Google OAuth or Email/Password (Internal JWT from sessionStorage)
+      // Both Google and Email/Password use internal JWT tokens stored in sessionStorage
+      const internalToken = getAuthToken();
+      if (internalToken) {
+        logger.debug("Using internal JWT token from sessionStorage", {
+          hasToken: !!internalToken,
+          tokenLength: internalToken.length,
+        });
+        return internalToken;
+      }
+
+      // No token available
+      logger.debug("No authentication token available", {
+        hasMsalAccount: !!account,
+        hasInternalToken: !!internalToken,
+      });
+      return null;
     },
     [instance, account, isAcquiringToken]
   );
 
   /**
    * Set up token getter for API client
-   * This allows the API client to get MSAL tokens
+   * This allows the API client to get tokens from all authentication methods
+   * Priority: MSAL (Microsoft) → Internal JWT (Google/Email/Password)
+   * 
+   * The unified getAccessToken function handles all three auth types:
+   * 1. Microsoft (MSAL) - Returns Azure AD token
+   * 2. Google OAuth - Returns internal JWT token from sessionStorage
+   * 3. Email/Password - Returns internal JWT token from sessionStorage
    */
   useEffect(() => {
-    if (account && instance) {
-      // Set token getter to use MSAL
-      const tokenGetter = async () => {
-        try {
-          logger.debug("Token getter called, requesting token...", {
-            accountId: account.homeAccountId,
-            accountName: account.name,
-            hasInstance: !!instance,
-            isAcquiringToken,
+    // Set token getter to use unified getAccessToken
+    // This works for all auth types: Microsoft, Google, Email/Password
+    const tokenGetter = async () => {
+      try {
+        logger.debug("Token getter called via unified getAccessToken", {
+          hasMsalAccount: !!account,
+          hasInternalToken: !!getAuthToken(),
+        });
+        
+        // Use the unified getAccessToken which handles all auth types
+        const token = await getAccessToken();
+        
+        if (token) {
+          logger.debug("Token retrieved for API client", {
+            hasToken: !!token,
+            tokenLength: token.length,
+            authType: account ? "Microsoft (MSAL)" : getAuthToken() ? "Google/Email/Password" : "None",
           });
-          
-          // Ensure account is still valid
-          if (!account) {
-            logger.warn("No account available for token acquisition");
-            return null;
-          }
-          
-          // If token acquisition is already in progress, wait and retry
-          if (isAcquiringToken) {
-            logger.debug("Token acquisition in progress, waiting 500ms...");
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // Try again after waiting
-            if (isAcquiringToken) {
-              logger.debug("Still acquiring token, using direct MSAL call");
-              // Bypass getAccessToken and call MSAL directly to avoid deadlock
-              try {
-                const request = tokenRequest();
-                const result = await instance.acquireTokenSilent({
-                  ...request,
-                  account: account,
-                });
-                if (result?.accessToken) {
-                  logger.debug("Direct MSAL token acquisition successful");
-                  return result.accessToken;
-                }
-              } catch (directError: any) {
-                logger.error("Direct MSAL call failed", directError instanceof Error ? directError : new Error(String(directError)), {
-                  errorCode: directError?.errorCode,
-                  errorMessage: directError?.message,
-                });
-              }
-              return null;
-            }
-          }
-          
-          // Call getAccessToken to get a fresh token
-          const token = await getAccessToken();
-          
-          if (token) {
-            logger.debug("Token retrieved for API client", {
-              hasToken: !!token,
-              tokenLength: token.length,
-              accountId: account.homeAccountId,
-            });
-            return token;
-          }
-          
-          // If getAccessToken returned null, try direct MSAL call as fallback
-          logger.warn("getAccessToken returned null, trying direct MSAL call");
-          try {
-            const request = tokenRequest();
-            const result = await instance.acquireTokenSilent({
-              ...request,
-              account: account,
-            });
-            if (result?.accessToken) {
-              logger.debug("Fallback token acquisition successful");
-              return result.accessToken;
-            } else {
-              logger.error("Fallback MSAL call returned no token");
-            }
-          } catch (fallbackError: any) {
-            logger.error("Fallback token acquisition failed", fallbackError instanceof Error ? fallbackError : new Error(String(fallbackError)), {
-              errorCode: fallbackError?.errorCode,
-              errorMessage: fallbackError?.message,
-            });
-          }
-          
-          return null;
-        } catch (error: any) {
-          logger.error("Failed to get access token in token getter", error instanceof Error ? error : new Error(String(error)), {
-            errorCode: error?.errorCode,
-            errorMessage: error?.message,
-          });
-          return null;
         }
-      };
-      
-      setTokenGetter(tokenGetter);
-      logger.debug("Token getter set for account", { accountId: account.homeAccountId });
-    } else {
-      // Clear token getter if no account or instance
-      setTokenGetter(null);
-      logger.debug("Token getter cleared (no account or instance)");
-    }
+        
+        return token;
+      } catch (error) {
+        logger.error("Token getter error", error instanceof Error ? error : new Error(String(error)));
+        return null;
+      }
+    };
+    
+    // Always set the token getter (works for all auth types)
+    setTokenGetter(tokenGetter);
+    logger.debug("Unified token getter set", {
+      hasMsalAccount: !!account,
+      hasInternalToken: !!getAuthToken(),
+    });
 
     // Cleanup on unmount
     return () => {
       setTokenGetter(null);
     };
-  }, [account, instance, getAccessToken, isAcquiringToken]);
+  }, [getAccessToken, account]);
 
   /**
-   * Check for email/password authentication token on mount
+   * Check for email/password or Google OAuth authentication token on mount
+   * This ensures tokens are detected immediately after redirect
    */
   useEffect(() => {
-    // Check if we have an email auth token (synchronous check)
+    // Check if we have a token (synchronous check)
     const token = getAuthToken();
     if (token && !account) {
-      // Token exists but no MSAL account - user is authenticated via email/password
-      // We'll need to fetch user info from the API
-      // For now, we'll check the token and set a basic authenticated state
-      // The actual user info should come from the API
+      // Token exists but no MSAL account - user is authenticated via email/password or Google OAuth
+      // Set emailAuthUser flag so the user profile loader knows to fetch user info
+      logger.debug("Detected token without MSAL account - email/password or Google OAuth user", {
+        hasToken: !!token,
+      });
+      // The loadUserProfile effect will handle fetching user info
     }
   }, [account]);
 
@@ -753,36 +744,64 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
-   * Enhanced logout that handles both MSAL and email auth
+   * Enhanced logout that handles MSAL (Microsoft), Google OAuth, and email/password auth
    */
   const logoutEnhanced = useCallback(async () => {
     try {
       setError(null);
       setIsLoading(true);
       
-      // If we have MSAL account, logout from MSAL
+      // Call backend logout endpoint for logging/auditing (works for all auth types)
+      try {
+        const { logout: logoutApi } = await import("@/lib/api/auth");
+        await logoutApi();
+      } catch (backendError) {
+        // Backend logout is optional - continue with client-side logout even if it fails
+        logger.debug("Backend logout call failed (non-critical)", backendError instanceof Error ? backendError : new Error(String(backendError)));
+      }
+      
+      // If we have MSAL account (Microsoft), logout from MSAL
       if (account) {
-        // Get app URL for logout redirect
-        const { getEnv } = await import("@/lib/config/browser/env");
-        const env = getEnv();
-        
-        const logoutConfig = {
-          ...logoutRequest,
-          postLogoutRedirectUri: env.app.url,
-          account: account || undefined,
-        };
-        await instance.logoutPopup(logoutConfig);
+        try {
+          // Get app URL for logout redirect
+          const { getEnv } = await import("@/lib/config/browser/env");
+          const env = getEnv();
+          
+          const logoutConfig = {
+            ...logoutRequest,
+            postLogoutRedirectUri: env.app.url,
+            account: account || undefined,
+          };
+          await instance.logoutPopup(logoutConfig);
+        } catch (msalError) {
+          // MSAL logout failure is non-critical - continue with token removal
+          logger.debug("MSAL logout failed (non-critical)", msalError instanceof Error ? msalError : new Error(String(msalError)));
+        }
       }
       
       // Remove all auth tokens (access and refresh)
+      // This works for all auth types:
+      // - Microsoft (MSAL): Tokens are in MSAL cache, but we also remove any stored tokens
+      // - Google OAuth: Uses internal JWT tokens stored in sessionStorage
+      // - Email/Password: Uses internal JWT tokens stored in sessionStorage
       removeAllTokens();
       
       // Clear user state
       setUser(null);
       setEmailAuthUser(null);
+      
+      // Redirect to home/login page after logout
+      // Use window.location to ensure a full page reload and clear any cached state
+      if (typeof window !== "undefined") {
+        window.location.href = "/";
+      }
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Logout failed");
       setError(error);
+      // Even if there's an error, try to remove tokens and clear state
+      removeAllTokens();
+      setUser(null);
+      setEmailAuthUser(null);
       throw error;
     } finally {
       setIsLoading(false);

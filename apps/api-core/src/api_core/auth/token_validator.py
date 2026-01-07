@@ -1,9 +1,23 @@
-"""Unified token validator for both Azure AD B2C and internal JWT tokens."""
+"""
+Unified token validator for Azure AD B2C/Entra ID, Google OAuth, and internal JWT tokens.
+
+This module provides a unified interface for validating tokens from multiple authentication
+providers:
+- Azure AD B2C / Microsoft Entra ID (RS256, asymmetric)
+- Google OAuth (RS256, asymmetric)
+- Internal JWT (HS256, symmetric)
+
+Token detection priority:
+1. Azure AD tokens (RS256, issuer contains login.microsoftonline.com or b2clogin.com)
+2. Google tokens (RS256, issuer is https://accounts.google.com)
+3. Internal JWT tokens (HS256, signed with our secret)
+"""
 
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from api_core.auth.azure_ad import AzureADB2CClient, UserInfo, get_azure_ad_client
+from api_core.auth.google_oauth import GoogleOAuthClient, GoogleUserInfo, get_google_oauth_client
 from api_core.auth.jwt import TokenPayload, get_jwt_handler
 from api_core.config import get_settings
 from api_core.exceptions import AuthenticationError
@@ -19,9 +33,9 @@ class TokenValidationResult:
         self,
         user_id: str,
         email: str,
-        token_type: str,  # "azure_ad_b2c" or "internal_jwt"
+        token_type: str,  # "azure_ad_b2c", "google_oauth", or "internal_jwt"
         payload: Optional[TokenPayload] = None,
-        user_info: Optional[UserInfo] = None,
+        user_info: Optional[Any] = None,  # Can be UserInfo (Azure) or GoogleUserInfo (Google)
         claims: Optional[Dict] = None,
     ):
         """Initialize validation result."""
@@ -42,11 +56,12 @@ class TokenValidationResult:
 
 
 class UnifiedTokenValidator:
-    """Unified validator that handles both Azure AD B2C and internal JWT tokens."""
+    """Unified validator that handles Azure AD B2C, Google OAuth, and internal JWT tokens."""
 
     def __init__(self):
         """Initialize unified token validator."""
         self.azure_client: Optional[AzureADB2CClient] = None
+        self.google_client: Optional[GoogleOAuthClient] = None
         self.jwt_handler = get_jwt_handler()
 
     @property
@@ -74,6 +89,30 @@ class UnifiedTokenValidator:
                 return None
         return self.azure_client
 
+    @property
+    def google_oauth_client(self) -> Optional[GoogleOAuthClient]:
+        """Get Google OAuth client (lazy initialization)."""
+        if self.google_client is None:
+            try:
+                from api_core.config import get_settings
+                settings = get_settings()
+                
+                # Check if Google OAuth is configured before trying to initialize
+                if not settings.google.is_configured:
+                    logger.debug(
+                        f"Google OAuth is not configured. "
+                        f"client_id={'set' if settings.google.client_id else 'missing'}, "
+                        f"client_secret={'set' if settings.google.client_secret else 'missing'}"
+                    )
+                    return None
+                
+                self.google_client = get_google_oauth_client()
+                logger.debug("Google OAuth client initialized")
+            except Exception as e:
+                logger.debug(f"Google OAuth client not available: {e}")
+                return None
+        return self.google_client
+
     def _is_azure_ad_b2c_token(self, token: str) -> bool:
         """Heuristic to determine if token is from Azure AD B2C or Entra ID."""
         try:
@@ -85,9 +124,9 @@ class UnifiedTokenValidator:
             
             # Azure AD B2C/Entra ID tokens use RS256 (asymmetric)
             # Internal JWT tokens use HS256 (symmetric)
-            # If it's RS256, it's definitely an Azure AD token
+            # If it's RS256, check issuer to distinguish from Google
             if alg == "RS256":
-                # Also decode payload to check issuer for confirmation
+                # Decode payload to check issuer for confirmation
                 try:
                     payload = jose_jwt.get_unverified_claims(token)
                     issuer = payload.get("iss", "")
@@ -95,13 +134,8 @@ class UnifiedTokenValidator:
                     if "login.microsoftonline.com" in issuer or "b2clogin.com" in issuer or "sts.windows.net" in issuer:
                         logger.debug(f"Token identified as Azure AD/Entra ID token (issuer: {issuer})")
                         return True
-                    # Even if issuer check fails, RS256 means it's Azure AD
-                    logger.debug(f"Token identified as Azure AD/Entra ID token (RS256 algorithm)")
-                    return True
                 except:
-                    # If we can't decode payload, but it's RS256, assume Azure AD
-                    logger.debug(f"Token identified as Azure AD/Entra ID token (RS256 algorithm, couldn't decode payload)")
-                    return True
+                    pass
             
             # If it's HS256, it's likely an internal JWT token
             if alg == "HS256":
@@ -112,8 +146,48 @@ class UnifiedTokenValidator:
             logger.debug(f"Error checking if token is Azure AD B2C/Entra ID: {e}")
         return False
 
+    def _is_google_token(self, token: str) -> bool:
+        """Heuristic to determine if token is from Google."""
+        try:
+            # Try to decode header without verification
+            from jose import jwt as jose_jwt
+
+            header = jose_jwt.get_unverified_header(token)
+            alg = header.get("alg", "")
+            
+            # Google tokens use RS256 (asymmetric)
+            # If it's RS256, check issuer to distinguish from Azure AD
+            if alg == "RS256":
+                # Decode payload to check issuer
+                try:
+                    payload = jose_jwt.get_unverified_claims(token)
+                    issuer = payload.get("iss", "")
+                    # Check if issuer is Google
+                    if issuer == "https://accounts.google.com":
+                        logger.debug(f"Token identified as Google token (issuer: {issuer})")
+                        return True
+                except:
+                    pass
+                
+        except Exception as e:
+            logger.debug(f"Error checking if token is Google: {e}")
+        return False
+
     async def validate_token(self, token: str) -> TokenValidationResult:
-        """Validate a token (either Azure AD B2C/Entra ID or internal JWT)."""
+        """
+        Validate a token (Azure AD B2C/Entra ID, Google OAuth, or internal JWT).
+        
+        Token detection priority:
+        1. Azure AD tokens (RS256, issuer contains login.microsoftonline.com or b2clogin.com)
+        2. Google tokens (RS256, issuer is https://accounts.google.com)
+        3. Internal JWT tokens (HS256, signed with our secret)
+        
+        Returns:
+            TokenValidationResult with user information
+            
+        Raises:
+            AuthenticationError: If token is invalid or cannot be validated
+        """
         # Check if Azure AD client is configured
         if not self.azure_ad_client:
             logger.debug("Azure AD B2C / Entra ID client not configured, trying internal JWT only")
@@ -150,7 +224,7 @@ class UnifiedTokenValidator:
                         "Azure AD / Entra ID is not configured. Please check backend configuration."
                     ) from e
                 # For other authentication errors, try internal JWT
-                logger.warning(f"Azure AD B2C / Entra ID validation failed: {e}, trying internal JWT", exc_info=True)
+                logger.warning(f"Azure AD B2C / Entra ID validation failed: {e}, trying other methods", exc_info=True)
             except Exception as e:
                 error_msg = str(e).lower()
                 if "not configured" in error_msg:
@@ -162,11 +236,55 @@ class UnifiedTokenValidator:
                     raise AuthenticationError(
                         "Azure AD / Entra ID is not configured. Please check backend configuration."
                     ) from e
-                logger.warning(f"Error validating Azure AD B2C / Entra ID token: {e}, trying internal JWT", exc_info=True)
+                logger.warning(f"Error validating Azure AD B2C / Entra ID token: {e}, trying other methods", exc_info=True)
 
-        # Try internal JWT token (only if it's not an Azure AD token)
-        # Don't try internal JWT if we already identified it as Azure AD token
-        if not is_azure_token:
+        # Check if token looks like Google token
+        is_google_token = self._is_google_token(token)
+        logger.debug(f"Token appears to be Google token: {is_google_token}")
+        
+        # Try Google OAuth if configured and token looks like Google token
+        if self.google_oauth_client and is_google_token:
+            try:
+                logger.info("Attempting to validate token as Google OAuth token")
+                user_info = await self.google_oauth_client.get_user_info(token)
+                logger.info(f"Google OAuth token validated successfully for user: {user_info.sub}")
+                return TokenValidationResult(
+                    user_id=user_info.sub or "",
+                    email=user_info.email or "",
+                    token_type="google_oauth",
+                    user_info=user_info,  # Store GoogleUserInfo
+                    claims=user_info.claims,
+                )
+            except AuthenticationError as e:
+                # If Google validation fails and it's a configuration error, don't try internal JWT
+                error_msg = str(e).lower()
+                if "not configured" in error_msg:
+                    logger.error(
+                        f"Google OAuth is not configured. "
+                        f"Check environment variables: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET. "
+                        f"Error: {e}"
+                    )
+                    raise AuthenticationError(
+                        "Google OAuth is not configured. Please check backend configuration."
+                    ) from e
+                # For other authentication errors, try internal JWT
+                logger.warning(f"Google OAuth validation failed: {e}, trying internal JWT", exc_info=True)
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "not configured" in error_msg:
+                    logger.error(
+                        f"Google OAuth is not configured. "
+                        f"Check environment variables: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET. "
+                        f"Error: {e}"
+                    )
+                    raise AuthenticationError(
+                        "Google OAuth is not configured. Please check backend configuration."
+                    ) from e
+                logger.warning(f"Error validating Google OAuth token: {e}, trying internal JWT", exc_info=True)
+
+        # Try internal JWT token (only if it's not an Azure AD or Google token)
+        # Don't try internal JWT if we already identified it as Azure AD or Google token
+        if not is_azure_token and not is_google_token:
             try:
                 logger.debug("Attempting to validate token as internal JWT token")
                 payload = self.jwt_handler.decode_token(token)
@@ -180,21 +298,33 @@ class UnifiedTokenValidator:
                 )
             except AuthenticationError as e:
                 logger.warning(f"Internal JWT validation failed: {e}")
-                raise AuthenticationError("Invalid token: Could not validate as Azure AD B2C or internal JWT token")
+                raise AuthenticationError(
+                    "Invalid token: Could not validate as Azure AD B2C, Google OAuth, or internal JWT token"
+                )
             except Exception as e:
                 logger.error(f"Error validating internal JWT token: {e}", exc_info=True)
                 raise AuthenticationError("Token validation failed")
         else:
-            # If we identified it as Azure AD token but validation failed, don't try internal JWT
+            # If we identified it as Azure AD or Google token but validation failed, don't try internal JWT
             # This prevents the "alg value is not allowed" error
-            logger.error(
-                "Token was identified as Azure AD/Entra ID token but validation failed. "
-                "Check Azure AD configuration and token audience/issuer."
-            )
-            raise AuthenticationError(
-                "Invalid token: Azure AD/Entra ID token validation failed. "
-                "Check backend Azure AD configuration (tenant_id, client_id, instance)."
-            )
+            if is_azure_token:
+                logger.error(
+                    "Token was identified as Azure AD/Entra ID token but validation failed. "
+                    "Check Azure AD configuration and token audience/issuer."
+                )
+                raise AuthenticationError(
+                    "Invalid token: Azure AD/Entra ID token validation failed. "
+                    "Check backend Azure AD configuration (tenant_id, client_id, instance)."
+                )
+            elif is_google_token:
+                logger.error(
+                    "Token was identified as Google OAuth token but validation failed. "
+                    "Check Google OAuth configuration and token audience/issuer."
+                )
+                raise AuthenticationError(
+                    "Invalid token: Google OAuth token validation failed. "
+                    "Check backend Google OAuth configuration (client_id, client_secret)."
+                )
 
     async def get_user_id_from_token(self, token: str) -> str:
         """Extract user ID from token (convenience method)."""
@@ -220,7 +350,11 @@ def get_token_validator() -> UnifiedTokenValidator:
 
 
 async def validate_token(token: str) -> TokenValidationResult:
-    """Validate a token (either Azure AD B2C or internal JWT) - convenience function."""
+    """
+    Validate a token (Azure AD B2C/Entra ID, Google OAuth, or internal JWT) - convenience function.
+    
+    This is a convenience wrapper around UnifiedTokenValidator.validate_token().
+    """
     validator = get_token_validator()
     return await validator.validate_token(token)
 

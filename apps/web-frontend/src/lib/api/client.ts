@@ -3,6 +3,14 @@
  * 
  * Base HTTP client for making API requests to the backend.
  * Handles authentication headers, error handling, and request/response transformation.
+ * 
+ * Supports all three authentication types:
+ * - Microsoft (Azure AD B2C/Entra ID) via MSAL
+ * - Google OAuth
+ * - Email/Password (internal JWT)
+ * 
+ * The client uses a unified token getter pattern that automatically handles
+ * token retrieval for all authentication methods.
  */
 
 import { getEnv } from "@/lib/config/browser/env";
@@ -38,13 +46,15 @@ type TokenGetter = () => Promise<string | null>;
 
 /**
  * Global token getter function
- * Set by AuthProvider to provide MSAL tokens
+ * Set by AuthProvider to provide tokens from all authentication methods
+ * Supports: Microsoft (MSAL), Google OAuth, Email/Password
  */
 let globalTokenGetter: TokenGetter | null = null;
 
 /**
  * Set the global token getter function
- * Called by AuthProvider to inject MSAL token retrieval
+ * Called by AuthProvider to inject unified token retrieval
+ * The token getter handles all three auth types automatically
  */
 export function setTokenGetter(getter: TokenGetter | null): void {
   globalTokenGetter = getter;
@@ -65,18 +75,23 @@ export function getAuthToken(): string | null {
  * Get authentication token asynchronously (for API calls)
  * 
  * Priority:
- * 1. Try to get token from MSAL via globalTokenGetter (if set)
- * 2. Fall back to sessionStorage for backward compatibility
+ * 1. Try to get token via globalTokenGetter (if set by AuthProvider)
+ *    - This handles all three auth types: Microsoft (MSAL), Google OAuth, Email/Password
+ * 2. Fallback: Try to get token directly from MSAL instance (for Microsoft auth)
+ * 3. Fallback: Get token from sessionStorage (for Google OAuth and Email/Password)
+ * 
+ * The globalTokenGetter uses the unified getAccessToken() function which automatically
+ * detects and handles the appropriate authentication method.
  */
 export async function getAuthTokenAsync(): Promise<string | null> {
   if (typeof window === "undefined") {
     return null;
   }
 
-  // Try MSAL token getter first (if set by AuthProvider)
+  // Priority 1: Try unified token getter (handles all auth types)
   if (globalTokenGetter) {
     try {
-      logger.debug("Calling globalTokenGetter...");
+      logger.debug("Calling globalTokenGetter (unified token getter)...");
       const token = await globalTokenGetter();
       if (token) {
         logger.debug("Token retrieved from globalTokenGetter", {
@@ -88,13 +103,13 @@ export async function getAuthTokenAsync(): Promise<string | null> {
         logger.warn("globalTokenGetter returned null/undefined");
       }
     } catch (error) {
-      logger.error("Failed to get token from MSAL", error instanceof Error ? error : new Error(String(error)));
-      // Fall through to sessionStorage
+      logger.error("Failed to get token from unified token getter", error instanceof Error ? error : new Error(String(error)));
+      // Fall through to fallback methods
     }
   } else {
-    logger.debug("No globalTokenGetter set, trying MSAL instance directly...");
+    logger.debug("No globalTokenGetter set, trying fallback methods...");
     
-    // Fallback: Try to get token directly from MSAL instance if available
+    // Priority 2: Fallback - Try to get token directly from MSAL instance (Microsoft auth only)
     try {
       const { getMsalInstance } = await import("@/lib/auth/msalInstance");
       const { tokenRequest } = await import("@/lib/auth/msalConfig");
@@ -103,7 +118,7 @@ export async function getAuthTokenAsync(): Promise<string | null> {
       
       if (accounts.length > 0) {
         const account = accounts[0];
-        logger.debug("Found account in MSAL instance, attempting token acquisition...");
+        logger.debug("Found MSAL account, attempting token acquisition...");
         
         try {
           const request = tokenRequest();
@@ -139,7 +154,7 @@ export async function getAuthTokenAsync(): Promise<string | null> {
           }
         }
       } else {
-        logger.debug("No accounts found in MSAL instance");
+        logger.debug("No MSAL accounts found");
       }
     } catch (msalError) {
       logger.warn("Could not access MSAL instance", {
@@ -148,9 +163,10 @@ export async function getAuthTokenAsync(): Promise<string | null> {
     }
   }
 
-  // Fall back to sessionStorage (for backward compatibility)
+  // Priority 3: Fall back to sessionStorage (for Google OAuth and Email/Password)
+  // Both Google and Email/Password use internal JWT tokens stored in sessionStorage
   const sessionToken = sessionStorage.getItem("auth_token");
-  logger.debug("SessionStorage token", {
+  logger.debug("SessionStorage token (Google/Email/Password)", {
     hasToken: !!sessionToken,
     tokenLength: sessionToken?.length || 0,
   });

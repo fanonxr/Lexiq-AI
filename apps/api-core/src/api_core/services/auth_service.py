@@ -20,11 +20,15 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Password hashing context
-# Suppress bcrypt version detection warning (known issue with bcrypt 4.3.0 and passlib)
-# The warning occurs because passlib tries to read bcrypt.__about__.__version__
+# Suppress bcrypt version detection warning/error (known issue with bcrypt 4.3.0 and passlib)
+# The error occurs because passlib tries to read bcrypt.__about__.__version__
 # which doesn't exist in bcrypt 4.3.0, but passlib handles this gracefully and continues
+# We suppress both warnings and the passlib logger to prevent the error from appearing in logs
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", message=".*bcrypt.*", category=UserWarning)
+    # Suppress passlib's bcrypt handler logger to prevent "(trapped) error reading bcrypt version"
+    passlib_logger = logging.getLogger("passlib.handlers.bcrypt")
+    passlib_logger.setLevel(logging.CRITICAL)  # Only show critical errors, suppress AttributeError
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
@@ -40,6 +44,49 @@ class AuthService:
         """
         self.repository = UserRepository(session)
         self.user_service = UserService(session)
+
+    def validate_password_strength(self, password: str) -> None:
+        """
+        Validate password strength requirements.
+        
+        Requirements:
+        - Minimum 8 characters
+        - At least one uppercase letter
+        - At least one lowercase letter
+        - At least one digit
+        - At least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)
+        
+        Args:
+            password: Password to validate
+            
+        Raises:
+            ValidationError: If password doesn't meet requirements
+        """
+        if not password:
+            raise ValidationError("Password is required")
+        
+        if len(password) < 8:
+            raise ValidationError("Password must be at least 8 characters long")
+        
+        has_upper = any(c.isupper() for c in password)
+        has_lower = any(c.islower() for c in password)
+        has_digit = any(c.isdigit() for c in password)
+        has_special = any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password)
+        
+        errors = []
+        if not has_upper:
+            errors.append("one uppercase letter")
+        if not has_lower:
+            errors.append("one lowercase letter")
+        if not has_digit:
+            errors.append("one digit")
+        if not has_special:
+            errors.append("one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)")
+        
+        if errors:
+            raise ValidationError(
+                f"Password must contain at least {', '.join(errors)}"
+            )
 
     def hash_password(self, password: str) -> str:
         """
@@ -81,6 +128,8 @@ class AuthService:
         Raises:
             AuthenticationError: If authentication fails
         """
+        from datetime import datetime, timedelta
+        
         # Get user by email
         user = await self.repository.get_by_email(email)
         if not user:
@@ -90,9 +139,51 @@ class AuthService:
         if not user.hashed_password:
             raise AuthenticationError("Invalid email or password")
 
+        # Check if account is locked
+        if user.locked_until and user.locked_until > datetime.utcnow():
+            remaining_minutes = int((user.locked_until - datetime.utcnow()).total_seconds() / 60)
+            raise AuthenticationError(
+                f"Account is locked due to too many failed login attempts. "
+                f"Please try again in {remaining_minutes} minute(s)."
+            )
+
         # Verify password
-        if not self.verify_password(password, user.hashed_password):
+        password_valid = self.verify_password(password, user.hashed_password)
+        
+        if not password_valid:
+            # Increment failed login attempts
+            failed_attempts = (user.failed_login_attempts or 0) + 1
+            max_attempts = 5  # Lock after 5 failed attempts
+            lockout_minutes = 30  # Lock for 30 minutes
+            
+            if failed_attempts >= max_attempts:
+                # Lock the account
+                locked_until = datetime.utcnow() + timedelta(minutes=lockout_minutes)
+                await self.repository.update_user(
+                    user.id,
+                    failed_login_attempts=failed_attempts,
+                    locked_until=locked_until,
+                )
+                raise AuthenticationError(
+                    f"Account has been locked due to too many failed login attempts. "
+                    f"Please try again in {lockout_minutes} minutes."
+                )
+            else:
+                # Update failed attempts count
+                await self.repository.update_user(
+                    user.id,
+                    failed_login_attempts=failed_attempts,
+                )
+            
             raise AuthenticationError("Invalid email or password")
+
+        # Successful login - reset failed attempts and unlock if locked
+        if user.failed_login_attempts > 0 or user.locked_until:
+            await self.repository.update_user(
+                user.id,
+                failed_login_attempts=0,
+                locked_until=None,
+            )
 
         # Check if user is active
         if not user.is_active:
@@ -121,6 +212,9 @@ class AuthService:
         Raises:
             ValidationError: If user already exists or validation fails
         """
+        # Validate password strength
+        self.validate_password_strength(password)
+        
         # Use UserService to create user (it handles validation and password hashing)
         return await self.user_service.create_user(
             email=email,
@@ -140,42 +234,185 @@ class AuthService:
         """
         return await self.user_service.get_user_by_id(user_id)
 
-    async def request_password_reset(self, email: str) -> None:
+    async def request_password_reset(self, email: str, frontend_url: str) -> None:
         """
         Request a password reset.
 
-        TODO: This is a placeholder implementation.
-        Will be completed in Phase 4 when user repository and email service are available.
+        Generates a secure reset token, stores it with expiration, and sends a reset email.
 
         Args:
             email: User email
+            frontend_url: Frontend base URL for reset link
 
         Raises:
             NotFoundError: If user not found
         """
-        # TODO: Implement password reset flow
-        # 1. Find user by email
-        # 2. Generate reset token
-        # 3. Store reset token with expiration
-        # 4. Send email with reset link
-        # async with get_session() as session:
-        #     user = await user_repository.get_by_email(session, email)
-        #     if not user:
-        #         raise NotFoundError("User not found")
-        #
-        #     reset_token = generate_reset_token()
-        #     await user_repository.update_reset_token(session, user.id, reset_token)
-        #     await email_service.send_password_reset_email(user.email, reset_token)
+        import secrets
+        from datetime import datetime, timedelta
+        from api_core.services.notifications_service import get_notifications_service
+        from api_core.models.notifications import NotificationCreateRequest
+        
+        # Find user by email
+        user = await self.repository.get_by_email(email)
+        if not user:
+            # Don't reveal if user exists (security best practice)
+            logger.info(f"Password reset requested for email: {email} (user not found)")
+            return
+        
+        # Check if user has a password (email/password users only)
+        if not user.hashed_password:
+            # User doesn't have a password (OAuth-only user)
+            logger.info(f"Password reset requested for OAuth-only user: {email}")
+            return
+        
+        # Generate secure reset token
+        reset_token = secrets.token_urlsafe(32)
+        
+        # Set expiration (24 hours)
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        
+        # Store token in database
+        await self.repository.set_password_reset_token(user.id, reset_token, expires_at)
+        
+        # Create reset link
+        reset_link = f"{frontend_url}/auth/reset-password/confirm?token={reset_token}"
+        
+        # Create email content
+        subject = "Reset your password"
+        message = f"""
+Hello,
 
-        # Placeholder: For now, just log
-        logger.info(f"Password reset requested for email: {email}")
+You requested to reset your password. Click the link below to reset it:
+
+{reset_link}
+
+This link will expire in 24 hours.
+
+If you didn't request a password reset, please ignore this email. Your password will remain unchanged.
+
+Best regards,
+LexiqAI Team
+        """.strip()
+        
+        # Send email via notifications service
+        if user.firm_id:
+            notifications_service = get_notifications_service(self.repository.session)
+            await notifications_service.create_notification(
+                NotificationCreateRequest(
+                    firm_id=user.firm_id,
+                    channel="email",
+                    to=user.email,
+                    subject=subject,
+                    message=message,
+                    idempotency_key=f"password_reset_{user.id}_{reset_token[:16]}",
+                )
+            )
+            logger.info(f"Password reset email sent to {email} for user {user.id}")
+        else:
+            logger.warning(f"User {user.id} has no firm_id, cannot send password reset email")
+
+    async def confirm_password_reset(self, token: str, new_password: str) -> None:
+        """
+        Confirm password reset with token and new password.
+
+        Args:
+            token: Password reset token
+            new_password: New password
+
+        Raises:
+            ValidationError: If token is invalid or expired
+            NotFoundError: If user not found
+        """
+        from datetime import datetime
+        
+        # Find user by reset token
+        user = await self.repository.get_by_reset_token(token)
+        if not user:
+            raise ValidationError("Invalid or expired password reset token")
+        
+        # Check if token is expired
+        if user.password_reset_expires_at and user.password_reset_expires_at < datetime.utcnow():
+            # Clear expired token
+            await self.repository.clear_password_reset_token(user.id)
+            raise ValidationError("Password reset token has expired. Please request a new one.")
+        
+        # Validate password strength
+        self.validate_password_strength(new_password)
+        
+        # Hash new password
+        hashed_password = self.hash_password(new_password)
+        
+        # Update password and clear reset token
+        await self.repository.update_user(
+            user.id,
+            hashed_password=hashed_password,
+            password_reset_token=None,
+            password_reset_expires_at=None,
+        )
+        
+        logger.info(f"Password reset confirmed for user {user.id} ({user.email})")
+
+    async def send_verification_email(self, user_id: str, email: str, firm_id: str, frontend_url: str) -> None:
+        """
+        Send email verification email to user.
+
+        Args:
+            user_id: User ID
+            email: User email address
+            firm_id: Firm ID for the notification
+            frontend_url: Frontend base URL for verification link
+
+        Raises:
+            NotFoundError: If user not found
+        """
+        import secrets
+        from api_core.services.notifications_service import get_notifications_service
+        from api_core.models.notifications import NotificationCreateRequest
+        
+        # Generate secure verification token
+        verification_token = secrets.token_urlsafe(32)
+        
+        # Store token in database
+        await self.repository.set_email_verification_token(user_id, verification_token)
+        
+        # Create verification link
+        verification_link = f"{frontend_url}/auth/verify-email?token={verification_token}"
+        
+        # Create email content
+        subject = "Verify your email address"
+        message = f"""
+Hello,
+
+Thank you for signing up! Please verify your email address by clicking the link below:
+
+{verification_link}
+
+This link will expire in 24 hours.
+
+If you didn't create an account, please ignore this email.
+
+Best regards,
+LexiqAI Team
+        """.strip()
+        
+        # Send email via notifications service
+        notifications_service = get_notifications_service(self.repository.session)
+        await notifications_service.create_notification(
+            NotificationCreateRequest(
+                firm_id=firm_id,
+                channel="email",
+                to=email,
+                subject=subject,
+                message=message,
+                idempotency_key=f"email_verification_{user_id}_{verification_token[:16]}",
+            )
+        )
+        
+        logger.info(f"Verification email sent to {email} for user {user_id}")
 
     async def verify_email_token(self, token: str) -> bool:
         """
         Verify email verification token.
-
-        TODO: This is a placeholder implementation.
-        Will be completed in Phase 4 when user repository is available.
 
         Args:
             token: Email verification token
@@ -185,23 +422,27 @@ class AuthService:
 
         Raises:
             ValidationError: If token is invalid
+            NotFoundError: If user not found
         """
-        # TODO: Implement email verification
-        # async with get_session() as session:
-        #     user = await user_repository.get_by_verification_token(session, token)
-        #     if not user:
-        #         raise ValidationError("Invalid verification token")
-        #     if user.is_verified:
-        #         return True
-        #     await user_repository.verify_email(session, user.id)
-        #     await session.commit()
-        #     return True
-
-        # Placeholder: For now, raise error
-        raise ValidationError(
-            "Email verification not yet implemented. "
-            "User repository will be available in Phase 4."
-        )
+        # Get user by verification token
+        user = await self.repository.get_by_verification_token(token)
+        if not user:
+            raise ValidationError("Invalid or expired verification token")
+        
+        # Check if already verified
+        if user.is_verified:
+            # Clear the token since it's already been used
+            await self.repository.clear_email_verification_token(user.id)
+            return True
+        
+        # Verify email
+        await self.repository.verify_email(user.id)
+        
+        # Clear the verification token
+        await self.repository.clear_email_verification_token(user.id)
+        
+        logger.info(f"Email verified for user {user.id} ({user.email})")
+        return True
 
 
 def get_auth_service(session: AsyncSession) -> AuthService:

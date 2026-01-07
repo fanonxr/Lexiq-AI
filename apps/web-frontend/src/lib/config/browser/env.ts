@@ -43,6 +43,13 @@ export interface AppConfig {
   apiUrl: string;
 }
 
+export interface GoogleOAuthConfig {
+  /** Google OAuth client ID */
+  clientId: string;
+  /** Google OAuth redirect URI */
+  redirectUri: string;
+}
+
 export interface FeatureFlags {
   /** Enable Google sign-in option */
   enableGoogleSignIn: boolean;
@@ -53,6 +60,8 @@ export interface FeatureFlags {
 export interface EnvironmentConfig {
   /** Microsoft Entra ID configuration */
   entraId: EntraIdConfig;
+  /** Google OAuth configuration */
+  googleOAuth: GoogleOAuthConfig;
   /** Application URLs */
   app: AppConfig;
   /** Feature flags */
@@ -247,6 +256,11 @@ function validateId(id: string, key: string): string {
 let envCache: EnvironmentConfig | null = null;
 
 function createEnvConfig(): EnvironmentConfig {
+  const appUrl = validateUrl(
+    getEnvVar('NEXT_PUBLIC_APP_URL', 'http://localhost:3000'),
+    'NEXT_PUBLIC_APP_URL'
+  );
+  
   return {
     // Microsoft Entra ID
     entraId: {
@@ -273,12 +287,21 @@ function createEnvConfig(): EnvironmentConfig {
       ),
     },
     
+    // Google OAuth
+    googleOAuth: {
+      clientId: getEnvVar('NEXT_PUBLIC_GOOGLE_CLIENT_ID', ''),
+      redirectUri: validateUrl(
+        getEnvVar(
+          'NEXT_PUBLIC_GOOGLE_REDIRECT_URI',
+          `${appUrl}/auth/google/callback`
+        ),
+        'NEXT_PUBLIC_GOOGLE_REDIRECT_URI'
+      ),
+    },
+    
     // Application URLs
     app: {
-      url: validateUrl(
-        getEnvVar('NEXT_PUBLIC_APP_URL', 'http://localhost:3000'),
-        'NEXT_PUBLIC_APP_URL'
-      ),
+      url: appUrl,
       apiUrl: validateUrl(
         getEnvVar('NEXT_PUBLIC_API_URL', 'http://localhost:8000'),
         'NEXT_PUBLIC_API_URL'
@@ -317,6 +340,10 @@ export function getEnv(): EnvironmentConfig {
         clientId: '',
         authority: 'https://login.microsoftonline.com/common',
         redirectUri: process.env.NEXT_PUBLIC_ENTRA_ID_REDIRECT_URI || 'http://localhost:3000',
+      },
+      googleOAuth: {
+        clientId: '',
+        redirectUri: process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/google/callback',
       },
       app: {
         url: 'http://localhost:3000',
