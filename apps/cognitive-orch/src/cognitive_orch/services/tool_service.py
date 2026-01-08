@@ -12,6 +12,7 @@ import httpx
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
+from cognitive_orch.clients import APICoreClient
 from cognitive_orch.config import get_settings
 from cognitive_orch.models.tools import (
     CheckAvailabilityArgs,
@@ -60,9 +61,8 @@ class ToolService:
     """Service responsible for tool definitions and safe execution."""
 
     def __init__(self) -> None:
-        self._core_api_url = settings.integration.core_api_url.rstrip("/")
         self._core_api_timeout = settings.integration.core_api_timeout
-        self._core_api_api_key = settings.integration.core_api_api_key
+        self._api_core_client = APICoreClient()
 
         # Allowlist / registry: tool_name -> ToolSpec
         self._tools: Dict[str, ToolSpec] = {
@@ -194,28 +194,18 @@ class ToolService:
 
     async def _handle_check_availability(self, args: CheckAvailabilityArgs) -> CheckAvailabilityResult:
         """Tool handler for check_availability -> Core API appointments availability."""
-        url = f"{self._core_api_url}/api/v1/appointments/availability"
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
-        if self._core_api_api_key:
-            headers["X-Internal-API-Key"] = self._core_api_api_key
-
         payload = args.model_dump(mode="json", exclude_none=True)
-        timeout = self._timeout_for("check_availability")
 
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-
-            if resp.status_code == 200:
-                return CheckAvailabilityResult.model_validate(resp.json())
-
-            # Provide a meaningful message, but avoid leaking details
+            response = await self._api_core_client.check_availability(payload)
+            return CheckAvailabilityResult.model_validate(response)
+        except httpx.HTTPStatusError as e:
             raise ExternalServiceError(
                 service="api-core",
                 message="Core API availability lookup failed",
-                status_code=resp.status_code,
+                status_code=e.response.status_code,
                 details={"endpoint": "/api/v1/appointments/availability"},
-            )
+            ) from e
         except httpx.TimeoutException as e:
             raise ExternalServiceError(
                 service="api-core",
@@ -241,27 +231,18 @@ class ToolService:
 
     async def _handle_book_appointment(self, args: BookAppointmentArgs) -> BookAppointmentResult:
         """Tool handler for book_appointment -> Core API appointments booking."""
-        url = f"{self._core_api_url}/api/v1/appointments"
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
-        if self._core_api_api_key:
-            headers["X-Internal-API-Key"] = self._core_api_api_key
-
         payload = args.model_dump(mode="json", exclude_none=True)
-        timeout = self._timeout_for("book_appointment")
 
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-
-            if resp.status_code in (200, 201):
-                return BookAppointmentResult.model_validate(resp.json())
-
+            response = await self._api_core_client.book_appointment(payload)
+            return BookAppointmentResult.model_validate(response)
+        except httpx.HTTPStatusError as e:
             raise ExternalServiceError(
                 service="api-core",
                 message="Core API appointment booking failed",
-                status_code=resp.status_code,
+                status_code=e.response.status_code,
                 details={"endpoint": "/api/v1/appointments"},
-            )
+            ) from e
         except httpx.TimeoutException as e:
             raise ExternalServiceError(
                 service="api-core",
@@ -286,27 +267,18 @@ class ToolService:
 
     async def _handle_create_lead(self, args: CreateLeadArgs) -> CreateLeadResult:
         """Tool handler for create_lead -> Core API leads endpoint."""
-        url = f"{self._core_api_url}/api/v1/leads"
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
-        if self._core_api_api_key:
-            headers["X-Internal-API-Key"] = self._core_api_api_key
-
         payload = args.model_dump(mode="json", exclude_none=True)
-        timeout = self._timeout_for("create_lead")
 
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-
-            if resp.status_code in (200, 201):
-                return CreateLeadResult.model_validate(resp.json())
-
+            response = await self._api_core_client.create_lead(payload)
+            return CreateLeadResult.model_validate(response)
+        except httpx.HTTPStatusError as e:
             raise ExternalServiceError(
                 service="api-core",
                 message="Core API lead creation failed",
-                status_code=resp.status_code,
+                status_code=e.response.status_code,
                 details={"endpoint": "/api/v1/leads"},
-            )
+            ) from e
         except httpx.TimeoutException as e:
             raise ExternalServiceError(
                 service="api-core",
@@ -331,27 +303,18 @@ class ToolService:
 
     async def _handle_send_notification(self, args: SendNotificationArgs) -> SendNotificationResult:
         """Tool handler for send_notification -> Core API notifications outbox."""
-        url = f"{self._core_api_url}/api/v1/notifications"
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
-        if self._core_api_api_key:
-            headers["X-Internal-API-Key"] = self._core_api_api_key
-
         payload = args.model_dump(mode="json", exclude_none=True)
-        timeout = self._timeout_for("send_notification")
 
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-
-            if resp.status_code in (200, 201):
-                return SendNotificationResult.model_validate(resp.json())
-
+            response = await self._api_core_client.send_notification(payload)
+            return SendNotificationResult.model_validate(response)
+        except httpx.HTTPStatusError as e:
             raise ExternalServiceError(
                 service="api-core",
                 message="Core API notification creation failed",
-                status_code=resp.status_code,
+                status_code=e.response.status_code,
                 details={"endpoint": "/api/v1/notifications"},
-            )
+            ) from e
         except httpx.TimeoutException as e:
             raise ExternalServiceError(
                 service="api-core",

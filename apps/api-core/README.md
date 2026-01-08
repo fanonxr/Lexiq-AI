@@ -280,6 +280,15 @@ See `.env.example` for all available environment variables. Key variables:
 **API:**
 - `API_V1_PREFIX` - API v1 prefix (default: `/api/v1`)
 
+**Internal API Key (Service-to-Service Auth):**
+- `INTERNAL_API_KEY_ENABLED` - Enable API-key auth for internal service endpoints (default: `false`)
+- `INTERNAL_API_KEY` - Shared secret API key for internal services (sent as `X-Internal-API-Key` header)
+- `COGNITIVE_ORCH_URL` - Cognitive Orchestrator service URL (default: `http://localhost:8001`)
+- `COGNITIVE_ORCH_API_KEY` - Internal API key for calling Cognitive Orchestrator (default: same as `INTERNAL_API_KEY`)
+- `COGNITIVE_ORCH_TIMEOUT` - Cognitive Orchestrator request timeout in seconds (default: `30`)
+
+**Note:** In production, `INTERNAL_API_KEY` must be set when `INTERNAL_API_KEY_ENABLED=true`. See [Internal API Key Documentation](/docs/internal-api-key/internal-api-impl-plan.md) for details.
+
 ### Using Configuration in Code
 
 ```python

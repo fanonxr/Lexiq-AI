@@ -29,7 +29,13 @@ router = APIRouter(prefix="/leads", tags=["leads"])
     include_in_schema=False,
 )
 async def create_lead(request: LeadCreateRequest) -> LeadResponse:
-    """Create a lead (idempotent via idempotency_key)."""
+    """
+    Create a lead (idempotent via idempotency_key).
+    
+    **Authentication**: Internal API key only (via InternalAuthDep)
+    **Used by**: Cognitive Orchestrator (tool: create_lead)
+    **Note**: This endpoint is not accessible to users. It requires the X-Internal-API-Key header.
+    """
     async with get_session_context() as session:
         service = get_leads_service(session)
         return await service.create_lead(request)

@@ -75,9 +75,10 @@ async def get_call(
     Get call by ID.
     
     Returns the call details including transcript and recording URL.
-    Supports both:
-    - User authentication: Users can only access their own calls
-    - Internal API key: Service-to-service calls can access any call
+    
+    **Authentication**: Dual auth (user token OR internal API key)
+    - **User authentication**: Users can only access their own calls
+    - **Internal API key**: Service-to-service calls can access any call (via X-Internal-API-Key header)
     """
     try:
         async with get_session_context() as session:
@@ -120,7 +121,13 @@ async def get_call(
     include_in_schema=False,
 )
 async def create_call(request: CallCreateRequest) -> CallResponse:
-    """Create a new call record."""
+    """
+    Create a new call record.
+    
+    **Authentication**: Internal API key only (via InternalAuthDep)
+    **Used by**: Voice Gateway service
+    **Note**: This endpoint is not accessible to users. It requires the X-Internal-API-Key header.
+    """
     try:
         async with get_session_context() as session:
             service = get_calls_service(session)
@@ -154,9 +161,10 @@ async def update_call(
     Update call by ID.
     
     Updates call status, transcript, recording URL, etc.
-    Supports both:
-    - User authentication: Users can only update their own calls
-    - Internal API key: Service-to-service calls can update any call
+    
+    **Authentication**: Dual auth (user token OR internal API key)
+    - **User authentication**: Users can only update their own calls
+    - **Internal API key**: Service-to-service calls can update any call (via X-Internal-API-Key header)
     """
     try:
         async with get_session_context() as session:

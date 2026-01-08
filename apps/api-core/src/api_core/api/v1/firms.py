@@ -45,9 +45,10 @@ async def get_firm_persona(
     Get firm persona.
     
     Returns the system prompt/persona configured for the specified firm.
-    Supports both:
-    - User authentication: Users must have access to the firm (e.g., have uploaded files or created resources for that firm).
-    - Internal API key: Service-to-service calls (e.g., from Cognitive Orchestrator) can access any firm.
+    
+    **Authentication**: Dual auth (user token OR internal API key)
+    - **User authentication**: Users must have access to the firm (e.g., have uploaded files or created resources for that firm)
+    - **Internal API key**: Service-to-service calls (e.g., from Cognitive Orchestrator) can access any firm (via X-Internal-API-Key header)
     """
     try:
         async with get_session_context() as session:
@@ -94,9 +95,10 @@ async def upsert_firm_persona(
     Update firm persona.
     
     Sets or updates the system prompt/persona for the specified firm.
-    Supports both:
-    - User authentication: Users must have access to the firm (e.g., have uploaded files or created resources for that firm).
-    - Internal API key: Service-to-service calls (e.g., from Cognitive Orchestrator) can update any firm.
+    
+    **Authentication**: Dual auth (user token OR internal API key)
+    - **User authentication**: Users must have access to the firm (e.g., have uploaded files or created resources for that firm)
+    - **Internal API key**: Service-to-service calls (e.g., from Cognitive Orchestrator) can update any firm (via X-Internal-API-Key header)
     """
     try:
         async with get_session_context() as session:
@@ -145,9 +147,9 @@ async def get_firm_settings(
     - Specialties
     - Qdrant collection name
     
-    Supports both:
-    - User authentication: Users must have access to the firm
-    - Internal API key: Service-to-service calls (e.g., from Cognitive Orchestrator) can access any firm.
+    **Authentication**: Dual auth (user token OR internal API key)
+    - **User authentication**: Users must have access to the firm
+    - **Internal API key**: Service-to-service calls (e.g., from Cognitive Orchestrator) can access any firm (via X-Internal-API-Key header)
     """
     try:
         async with get_session_context() as session:
@@ -200,7 +202,9 @@ async def provision_phone_number(
     - Configures webhook automatically
     - Returns the phone number details
     
-    Requires user to have access to the firm.
+    **Authentication**: Dual auth (user token OR internal API key)
+    - **User authentication**: Users must have access to the firm
+    - **Internal API key**: Service-to-service calls can provision for any firm (via X-Internal-API-Key header)
     """
     try:
         async with get_session_context() as session:
@@ -266,7 +270,9 @@ async def get_firm_phone_number(
     - Twilio Subaccount SID
     - Area code
     
-    Requires user to have access to the firm.
+    **Authentication**: Dual auth (user token OR internal API key)
+    - **User authentication**: Users must have access to the firm
+    - **Internal API key**: Service-to-service calls can access any firm (via X-Internal-API-Key header)
     """
     try:
         async with get_session_context() as session:
@@ -331,7 +337,9 @@ async def release_firm_phone_number(
         release_from_twilio: If True (default), release the number from Twilio.
                            If False, only clear from database (useful if number was already released).
     
-    Requires user to have access to the firm.
+    **Authentication**: Dual auth (user token OR internal API key)
+    - **User authentication**: Users must have access to the firm
+    - **Internal API key**: Service-to-service calls can release for any firm (via X-Internal-API-Key header)
     """
     try:
         async with get_session_context() as session:

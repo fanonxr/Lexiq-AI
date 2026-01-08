@@ -1,2 +1,1 @@
-"""Test suite for Cognitive Orchestrator."""
-
+"""Tests for cognitive-orch service."""

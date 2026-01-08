@@ -29,13 +29,16 @@ RUN if [ -f poetry.lock ]; then \
 # Copy application code
 COPY apps/cognitive-orch/src/ ./src/
 
+# Copy shared libraries
+COPY libs/py-common/src/ ./libs/py-common/src/
+
 # Install the package in development mode so cognitive_orch is importable
 # Try to install with poetry, but if it fails, we'll rely on PYTHONPATH
 RUN poetry install --no-dev --no-interaction --no-ansi 2>&1 || echo "Poetry install completed with warnings or skipped"
 
-# Set PYTHONPATH to ensure cognitive_orch can be imported
+# Set PYTHONPATH to ensure cognitive_orch and py_common can be imported
 # This is the primary way Python will find the module
-ENV PYTHONPATH=/app/src:$PYTHONPATH
+ENV PYTHONPATH=/app/src:/app/libs/py-common/src:$PYTHONPATH
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

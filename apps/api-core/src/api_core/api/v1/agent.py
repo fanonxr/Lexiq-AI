@@ -275,12 +275,6 @@ async def improve_script(
         if not request.script or not request.script.strip():
             raise ValidationError("Script text is required")
         
-        # Get Cognitive Orchestrator URL from config or environment
-        cognitive_orch_url = os.getenv(
-            "COGNITIVE_ORCH_URL",
-            "http://cognitive-orch:8001"
-        )
-        
         # Build prompt for script improvement
         script_type_prompts = {
             "greeting": "Improve this greeting script to be more professional, warm, and engaging while maintaining clarity:",
@@ -291,44 +285,46 @@ async def improve_script(
         prompt = f"{script_type_prompts.get(request.scriptType, 'Improve this script:')}\n\n{request.script}"
         
         # Call Cognitive Orchestrator
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                chat_response = await client.post(
-                    f"{cognitive_orch_url}/api/v1/orchestrator/chat",
-                    json={
-                        "message": prompt,
-                        "user_id": current_user.user_id,
-                        "firm_id": None,  # Can be enhanced to get from user
-                        "tools_enabled": False,
-                        "temperature": 0.7,  # Slightly higher for creative improvement
-                    },
-                )
-                
-                if chat_response.status_code != 200:
-                    logger.error(
-                        f"Cognitive Orchestrator returned error: {chat_response.status_code} - {chat_response.text}"
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail="Cognitive Orchestrator returned an error",
-                    )
-                
-                response_data = chat_response.json()
-                improved_script = response_data.get("response", request.script)
-                
-                return ImproveScriptResponse(improvedScript=improved_script)
-                
-            except httpx.TimeoutException:
+        try:
+            from api_core.clients.cognitive_orch_client import CognitiveOrchClient
+            
+            client = CognitiveOrchClient()
+            response_data = await client.chat(
+                message=prompt,
+                user_id=current_user.user_id,
+                firm_id=None,  # Can be enhanced to get from user
+                tools_enabled=False,
+                temperature=0.7,  # Slightly higher for creative improvement
+            )
+            
+            improved_script = response_data.get("response", request.script)
+            
+            return ImproveScriptResponse(improvedScript=improved_script)
+            
+        except Exception as e:
+            # InternalAPIClient raises httpx exceptions, catch them here
+            import httpx
+            if isinstance(e, httpx.TimeoutException):
                 raise HTTPException(
                     status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                     detail="Cognitive Orchestrator request timed out",
+                ) from e
+            elif isinstance(e, httpx.HTTPStatusError):
+                logger.error(
+                    f"Cognitive Orchestrator returned error: {e.response.status_code} - {e.response.text}"
                 )
-            except httpx.RequestError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Cognitive Orchestrator returned an error",
+                ) from e
+            elif isinstance(e, httpx.RequestError):
                 logger.error(f"Error calling Cognitive Orchestrator: {e}", exc_info=True)
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="Failed to connect to Cognitive Orchestrator",
                 ) from e
+            # Re-raise if it's not an httpx exception
+            raise
         
     except ValidationError as e:
         raise HTTPException(

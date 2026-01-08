@@ -47,9 +47,14 @@ router = APIRouter(prefix="/appointments", tags=["appointments"])
     include_in_schema=False,
 )
 async def check_availability(request: AvailabilityRequest) -> AvailabilityResponse:
-    """Return candidate slots in the requested window.
+    """
+    Return candidate slots in the requested window.
 
     This MVP implementation applies simple business-hour rules (Mon–Fri, 9–5 local time).
+    
+    **Authentication**: Internal API key only (via InternalAuthDep)
+    **Used by**: Cognitive Orchestrator (tool: check_availability)
+    **Note**: This endpoint is not accessible to users. It requires the X-Internal-API-Key header.
     """
     service = get_appointments_service()
     try:
@@ -73,7 +78,13 @@ async def check_availability(request: AvailabilityRequest) -> AvailabilityRespon
     include_in_schema=False,
 )
 async def book_appointment(request: AppointmentCreateRequest) -> AppointmentResponse:
-    """Book an appointment (idempotent via idempotency_key)."""
+    """
+    Book an appointment (idempotent via idempotency_key).
+    
+    **Authentication**: Internal API key only (via InternalAuthDep)
+    **Used by**: Cognitive Orchestrator (tool: book_appointment)
+    **Note**: This endpoint is not accessible to users. It requires the X-Internal-API-Key header.
+    """
     async with get_session_context() as session:
         service = get_appointments_service_for_session(session)
         return await service.book_appointment(request)

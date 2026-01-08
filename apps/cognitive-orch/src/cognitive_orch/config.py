@@ -346,6 +346,16 @@ class Settings(BaseSettings):
         default="INFO", description="Logging level. Env var: LOG_LEVEL"
     )
 
+    # Internal API Key Authentication
+    internal_api_key_enabled: bool = Field(
+        default=False,
+        description="Enable API-key auth for internal service endpoints. Env var: INTERNAL_API_KEY_ENABLED",
+    )
+    internal_api_key: Optional[str] = Field(
+        default=None,
+        description="Shared secret API key for internal services (sent as X-Internal-API-Key). Env var: INTERNAL_API_KEY",
+    )
+
     # Sub-settings
     llm: LLMSettings = Field(default_factory=LLMSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
@@ -428,6 +438,12 @@ class Settings(BaseSettings):
                     "At least one LLM provider must be configured in production. "
                     "Set AZURE_API_KEY/AZURE_API_BASE, ANTHROPIC_API_KEY, "
                     "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_REGION, or GROQ_API_KEY."
+                )
+
+            # Validate internal API key if enabled
+            if self.internal_api_key_enabled and not self.internal_api_key:
+                raise ValueError(
+                    "INTERNAL_API_KEY must be set when INTERNAL_API_KEY_ENABLED=true (internal endpoints protection)."
                 )
 
             # Warn about missing API keys for configured models

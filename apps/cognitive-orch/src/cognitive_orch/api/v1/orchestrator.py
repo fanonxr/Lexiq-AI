@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from cognitive_orch.auth.internal_service import InternalAuthDep
 from cognitive_orch.models.chat import ChatRequest, ChatResponse
 from cognitive_orch.models.conversation import ConversationState
 from cognitive_orch.models.conversation_api import (
@@ -45,14 +46,25 @@ def _state_to_llm_messages(state: ConversationState) -> List[Dict[str, Any]]:
     "/chat",
     response_model=ChatResponse,
     status_code=status.HTTP_200_OK,
-    summary="Chat with the Cognitive Orchestrator",
+    summary="Chat with the Cognitive Orchestrator (Internal)",
+    description=(
+        "Primary chat entrypoint for orchestrator tool execution + state. "
+        "Intended for internal service calls (e.g., API Core)."
+    ),
+    dependencies=[InternalAuthDep],
+    include_in_schema=False,
 )
 async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
-    """Primary chat entrypoint (HTTP) for orchestrator tool execution + state.
+    """
+    Primary chat entrypoint (HTTP) for orchestrator tool execution + state.
 
     - Loads/creates conversation state in Redis
     - Runs LLM tool-calling loop (optional)
     - Persists new assistant/tool messages to Redis
+
+    **Authentication**: Internal API key only (via InternalAuthDep)
+    **Used by**: API Core service
+    **Note**: This endpoint is not accessible to users. It requires the X-Internal-API-Key header.
     """
     try:
         # Use app-initialized redis pool if present (created at startup)

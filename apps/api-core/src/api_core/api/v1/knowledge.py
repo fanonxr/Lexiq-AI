@@ -284,8 +284,9 @@ async def update_file_status_internal(
     """
     Update the processing status of a knowledge base file.
 
-    NOTE: This is intended for internal service-to-service calls.
-    In production, this should be protected by service authentication.
+    **Authentication**: Internal API key only (via InternalAuthDep)
+    **Used by**: Document Ingestion service
+    **Note**: This endpoint is not accessible to users. It requires the X-Internal-API-Key header.
     """
     try:
         async with get_session_context() as session:
@@ -324,8 +325,9 @@ async def update_qdrant_info_internal(
     """
     Update Qdrant collection and point IDs for a knowledge base file.
 
-    NOTE: This is intended for internal service-to-service calls.
-    In production, this should be protected by service authentication.
+    **Authentication**: Internal API key only (via InternalAuthDep)
+    **Used by**: Document Ingestion service
+    **Note**: This endpoint is not accessible to users. It requires the X-Internal-API-Key header.
     """
     try:
         async with get_session_context() as session:
@@ -486,17 +488,7 @@ async def query_knowledge_base(
         Response with answer, sources, and chat message format
     """
     try:
-        import httpx
-        from api_core.config import get_settings
-        
-        settings = get_settings()
-        
-        # Get Cognitive Orchestrator URL from config or environment
-        # Default to localhost:8001 if not configured
-        cognitive_orch_url = os.getenv(
-            "COGNITIVE_ORCH_URL",
-            "http://localhost:8001"
-        )
+        from api_core.clients.cognitive_orch_client import CognitiveOrchClient
         
         # Use firm_id from user if available
         user_firm_id = firm_id
@@ -506,67 +498,69 @@ async def query_knowledge_base(
             pass
         
         # Call Cognitive Orchestrator chat endpoint
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            chat_response = await client.post(
-                f"{cognitive_orch_url}/api/v1/orchestrator/chat",
-                json={
-                    "message": payload.query,
-                    "user_id": current_user.user_id,
-                    "firm_id": user_firm_id,
-                    "tools_enabled": False,  # Disable tools for simple RAG queries
-                    "temperature": 0.2,
-                },
-            )
-            
-            if chat_response.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Cognitive Orchestrator returned error: {chat_response.text}",
-                )
-            
-            chat_data = chat_response.json()
-            
-            # Transform Cognitive Orchestrator response to frontend format
-            # Frontend expects: { answer: str, sources: string[], message: ChatMessage }
-            # Orchestrator returns: { conversation_id: str, response: str, tool_results: list, iterations: int }
-            
-            # Extract sources from tool_results if available
-            sources: list[str] = []
-            if chat_data.get("tool_results"):
-                for tool_result in chat_data["tool_results"]:
-                    if isinstance(tool_result, dict):
-                        # Look for source references in tool results
-                        if "sources" in tool_result:
-                            sources.extend(tool_result["sources"])
-                        elif "source" in tool_result:
-                            sources.append(tool_result["source"])
-            
-            # Create chat message format
-            from datetime import datetime
-            message = {
-                "id": str(uuid.uuid4()),
-                "role": "assistant",
-                "content": chat_data.get("response", ""),
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-            
-            return {
-                "answer": chat_data.get("response", ""),
-                "sources": sources,
-                "message": message,
-            }
-            
-    except httpx.TimeoutException:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Cognitive Orchestrator request timed out",
+        client = CognitiveOrchClient()
+        chat_data = await client.chat(
+            message=payload.query,
+            user_id=current_user.user_id,
+            firm_id=user_firm_id,
+            tools_enabled=False,  # Disable tools for simple RAG queries
+            temperature=0.2,
         )
-    except httpx.RequestError as e:
-        logger.error(f"Error calling Cognitive Orchestrator: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to connect to Cognitive Orchestrator",
-        ) from e
+        
+        # Transform Cognitive Orchestrator response to frontend format
+        # Frontend expects: { answer: str, sources: string[], message: ChatMessage }
+        # Orchestrator returns: { conversation_id: str, response: str, tool_results: list, iterations: int }
+        
+        # Extract sources from tool_results if available
+        sources: list[str] = []
+        if chat_data.get("tool_results"):
+            for tool_result in chat_data["tool_results"]:
+                if isinstance(tool_result, dict):
+                    # Look for source references in tool results
+                    if "sources" in tool_result:
+                        sources.extend(tool_result["sources"])
+                    elif "source" in tool_result:
+                        sources.append(tool_result["source"])
+        
+        # Create chat message format
+        from datetime import datetime
+        message = {
+            "id": str(uuid.uuid4()),
+            "role": "assistant",
+            "content": chat_data.get("response", ""),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        
+        return {
+            "answer": chat_data.get("response", ""),
+            "sources": sources,
+            "message": message,
+        }
+            
+    except Exception as e:
+        # InternalAPIClient raises httpx exceptions, catch them here
+        import httpx
+        if isinstance(e, httpx.TimeoutException):
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Cognitive Orchestrator request timed out",
+            ) from e
+        elif isinstance(e, httpx.HTTPStatusError):
+            logger.error(
+                f"Cognitive Orchestrator returned error: {e.response.status_code} - {e.response.text}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Cognitive Orchestrator returned error: {e.response.text}",
+            ) from e
+        elif isinstance(e, httpx.RequestError):
+            logger.error(f"Error calling Cognitive Orchestrator: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to connect to Cognitive Orchestrator",
+            ) from e
+        # Re-raise if it's not an httpx exception
+        raise
     except Exception as e:
         logger.error(f"Error querying knowledge base: {e}", exc_info=True)
         raise HTTPException(

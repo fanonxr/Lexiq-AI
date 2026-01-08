@@ -26,14 +26,16 @@ RUN poetry lock && \
 # Copy application code
 COPY apps/api-core/src/ ./src/
 COPY apps/api-core/alembic.ini ./
+# Copy shared py-common library
+COPY libs/py-common/src/ ./libs/py-common/src/
 
 # Install the package in development mode so api_core is importable
 # Try to install with poetry, but if it fails, we'll rely on PYTHONPATH
 RUN poetry install --no-dev --no-interaction --no-ansi 2>&1 || echo "Poetry install completed with warnings or skipped"
 
-# Set PYTHONPATH to ensure api_core can be imported
-# This is the primary way Python will find the module
-ENV PYTHONPATH=/app/src:$PYTHONPATH
+# Set PYTHONPATH to ensure api_core and py_common can be imported
+# This is the primary way Python will find the modules
+ENV PYTHONPATH=/app/src:/app/libs/py-common/src:$PYTHONPATH
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

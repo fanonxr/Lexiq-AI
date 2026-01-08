@@ -115,7 +115,12 @@ See `.env.example` for all available configuration options. Key variables:
 - **Storage**: `STORAGE_ACCOUNT_NAME`, `STORAGE_USE_MANAGED_IDENTITY`
 - **Embeddings**: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`
 - **Qdrant**: `QDRANT_URL`, `QDRANT_API_KEY`
-- **API Core**: `CORE_API_URL`
+- **API Core**: `CORE_API_URL`, `CORE_API_API_KEY` (internal API key for service-to-service auth)
+
+**Internal API Key (Service-to-Service Auth):**
+- `CORE_API_API_KEY` - Internal API key for calling API Core internal endpoints (sent as `X-Internal-API-Key` header). This should match the `INTERNAL_API_KEY` value in the API Core service.
+
+**Note:** See [Internal API Key Documentation](/docs/internal-api-key/internal-api-impl-plan.md) for details on service-to-service authentication.
 
 ## API Endpoints
 

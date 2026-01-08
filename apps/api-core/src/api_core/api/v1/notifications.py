@@ -29,7 +29,13 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
     include_in_schema=False,
 )
 async def create_notification(request: NotificationCreateRequest) -> NotificationResponse:
-    """Create a notification (idempotent via idempotency_key)."""
+    """
+    Create a notification (idempotent via idempotency_key).
+    
+    **Authentication**: Internal API key only (via InternalAuthDep)
+    **Used by**: Cognitive Orchestrator (tool: send_notification)
+    **Note**: This endpoint is not accessible to users. It requires the X-Internal-API-Key header.
+    """
     async with get_session_context() as session:
         service = get_notifications_service(session)
         return await service.create_notification(request)
