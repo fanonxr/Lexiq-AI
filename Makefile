@@ -35,7 +35,7 @@ voice-gateway-vendor: ## Vendor voice-gateway dependencies
 	@echo "Vendoring Voice Gateway dependencies..."
 	cd apps/voice-gateway && go mod vendor
 
-.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-voice-gateway docker-build-no-cache install test format lint terraform-init terraform-plan terraform-apply terraform-destroy frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp db-reset db-reset-local orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check voice-deps voice-build voice-run voice-test voice-test-cov voice-fmt voice-vet voice-lint voice-check voice-clean voice-health proto-compile proto-compile-go proto-clean-go
+.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-voice-gateway docker-build-no-cache install test format lint terraform-init terraform-plan terraform-apply terraform-destroy frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp db-reset db-reset-local orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check voice-deps voice-build voice-run voice-test voice-test-cov voice-fmt voice-vet voice-lint voice-check voice-clean voice-health proto-compile proto-compile-go proto-clean-go generate-api-key generate-api-key-long generate-api-key-env generate-api-key-docker
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -810,6 +810,23 @@ proto-clean-go: ## Clean generated Go proto files
 	@echo "Cleaning generated Go proto files..."
 	@rm -rf apps/voice-gateway/internal/orchestrator/proto
 	@echo "✓ Go proto files cleaned"
+
+# Internal API Key Management
+generate-api-key: ## Generate a secure internal API key (default: 32 bytes)
+	@echo "Generating secure internal API key..."
+	@python3 tools/scripts/generate_internal_api_key.py
+
+generate-api-key-long: ## Generate a longer internal API key (64 bytes)
+	@echo "Generating secure internal API key (64 bytes)..."
+	@python3 tools/scripts/generate_internal_api_key.py --length 64
+
+generate-api-key-env: ## Generate internal API key in .env format
+	@echo "Generating internal API key in .env format..."
+	@python3 tools/scripts/generate_internal_api_key.py --format env
+
+generate-api-key-docker: ## Generate internal API key in docker-compose format
+	@echo "Generating internal API key in docker-compose format..."
+	@python3 tools/scripts/generate_internal_api_key.py --format docker
 
 # Development utilities
 clean: ## Clean build artifacts and temporary files

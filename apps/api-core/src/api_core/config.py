@@ -288,6 +288,25 @@ class ServerSettings(BaseSettings):
     reload: bool = Field(default=False, description="Enable auto-reload (development only)")
 
 
+class CognitiveOrchSettings(BaseSettings):
+    """Cognitive Orchestrator service configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="COGNITIVE_ORCH_", case_sensitive=False)
+
+    url: str = Field(
+        default="http://localhost:8001",
+        description="Cognitive Orchestrator service URL. Env var: COGNITIVE_ORCH_URL"
+    )
+    api_key: Optional[str] = Field(
+        default=None,
+        description="Internal API key for calling Cognitive Orchestrator internal endpoints (sent as X-Internal-API-Key). Env var: COGNITIVE_ORCH_API_KEY"
+    )
+    timeout: int = Field(
+        default=30,
+        description="Request timeout in seconds. Env var: COGNITIVE_ORCH_TIMEOUT"
+    )
+
+
 class Settings(BaseSettings):
     """Application settings."""
 
@@ -336,6 +355,7 @@ class Settings(BaseSettings):
     cors: CorsSettings = Field(default_factory=CorsSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     google: GoogleSettings = Field(default_factory=GoogleSettings)
+    cognitive_orch: CognitiveOrchSettings = Field(default_factory=CognitiveOrchSettings)
 
     @field_validator("environment", mode="before")
     @classmethod

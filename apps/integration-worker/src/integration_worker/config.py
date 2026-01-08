@@ -1,7 +1,23 @@
 """Configuration management for integration worker."""
 
 from typing import Optional
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class APICoreSettings(BaseSettings):
+    """API Core service configuration."""
+    
+    model_config = SettingsConfigDict(env_prefix="CORE_API_", case_sensitive=False)
+    
+    url: str = Field(
+        default="http://localhost:8000",
+        description="Core API service URL. Env var: CORE_API_URL"
+    )
+    api_key: Optional[str] = Field(
+        default=None,
+        description="Internal API key for calling API Core internal endpoints (sent as X-Internal-API-Key). Env var: CORE_API_API_KEY"
+    )
 
 
 class Settings(BaseSettings):
@@ -23,9 +39,19 @@ class Settings(BaseSettings):
     # Redis (Celery broker + result backend)
     redis_url: str = "redis://localhost:6379/0"
     
-    # API Core service
-    api_core_url: str = "http://localhost:8000"
-    api_core_api_key: Optional[str] = None  # For service-to-service auth
+    # API Core service (using nested settings for consistent env var naming)
+    api_core: APICoreSettings = Field(default_factory=APICoreSettings)
+    
+    # Backward compatibility properties
+    @property
+    def api_core_url(self) -> str:
+        """Backward compatibility: get API Core URL."""
+        return self.api_core.url
+    
+    @property
+    def api_core_api_key(self) -> Optional[str]:
+        """Backward compatibility: get API Core API key."""
+        return self.api_core.api_key
     
     # Azure AD / Microsoft Graph
     azure_ad_client_id: str

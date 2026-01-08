@@ -49,14 +49,23 @@ LexiqAI is built as an **Event-Driven Microservices** platform on **Microsoft Az
    # Edit .env.local with your configuration
    ```
 
-4. **Start the frontend**
+4. **Generate internal API key (for service-to-service communication)**
+   ```bash
+   # Generate a secure API key
+   make generate-api-key
+   
+   # Add to docker-compose.yml or .env file
+   # See docs/internal-api-key/internal-api-impl-plan.md for details
+   ```
+
+5. **Start the frontend**
    ```bash
    cd apps/web-frontend
    npm install
    npm run dev
    ```
 
-5. **Access the application**
+6. **Access the application**
    - Frontend: http://localhost:3000
    - PostgreSQL: localhost:5432
    - Redis: localhost:6379
@@ -118,6 +127,8 @@ See [Makefile](./Makefile) for all available commands.
 - [Foundation Phase Plan](/docs/foundation/phase-1-plan.md) - Detailed implementation plan
 - [Local Development Guide](/docs/foundation/local-development.md) - Local setup instructions
 - [Azure Setup Guide](/docs/foundation/azure-setup.md) - Azure infrastructure setup
+- [Internal API Key Implementation](/docs/internal-api-key/internal-api-impl-plan.md) - Service-to-service authentication
+- [Internal API Key Troubleshooting](/docs/internal-api-key/TROUBLESHOOTING.md) - Troubleshooting guide
 
 ## 🔒 Security & Compliance
 
@@ -125,6 +136,7 @@ See [Makefile](./Makefile) for all available commands.
 - **Network:** Private VNet with isolated subnets
 - **Data:** Encryption at rest (AES-256) and in transit (TLS 1.2+)
 - **Secrets:** Zero-trust architecture with Azure Managed Identities
+- **Service-to-Service Auth:** Internal API key authentication for microservice communication
 
 ## 🏢 Infrastructure
 

@@ -261,7 +261,15 @@ See `.env.example` for all available environment variables. Key variables:
 
 **Integration:**
 - `CORE_API_URL` - Core API service URL (default: `http://localhost:8000`)
+- `CORE_API_API_KEY` - Internal API key for calling API Core (sent as `X-Internal-API-Key` header)
+- `CORE_API_TIMEOUT` - API Core request timeout in seconds (default: `30`)
 - `INTEGRATION_WORKER_URL` - Integration Worker service URL (default: `http://localhost:8002`)
+
+**Internal API Key (Service-to-Service Auth):**
+- `INTERNAL_API_KEY_ENABLED` - Enable API-key auth for internal service endpoints (default: `false`)
+- `INTERNAL_API_KEY` - Shared secret API key for internal services (sent as `X-Internal-API-Key` header)
+
+**Note:** In production, `INTERNAL_API_KEY` must be set when `INTERNAL_API_KEY_ENABLED=true`. The `CORE_API_API_KEY` should match the `INTERNAL_API_KEY` value in the API Core service. See [Internal API Key Documentation](/docs/internal-api-key/internal-api-impl-plan.md) for details.
 
 **Context Window:**
 - `MAX_CONTEXT_WINDOW` - Maximum context window size in tokens (default: `8000`)

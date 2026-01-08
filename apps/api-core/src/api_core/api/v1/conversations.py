@@ -66,9 +66,11 @@ async def get_conversation(
     """
     Get conversation by ID.
     
-    Returns the conversation with all messages. Supports both:
-    - User authentication: Users can only access their own conversations
-    - Internal API key: Service-to-service calls can access any conversation
+    Returns the conversation with all messages.
+    
+    **Authentication**: Dual auth (user token OR internal API key)
+    - **User authentication**: Users can only access their own conversations
+    - **Internal API key**: Service-to-service calls can access any conversation (via X-Internal-API-Key header)
     """
     try:
         async with get_session_context() as session:

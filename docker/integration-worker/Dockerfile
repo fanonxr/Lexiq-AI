@@ -19,6 +19,9 @@ COPY apps/api-core/requirements.txt /app/api-core/requirements.txt
 COPY apps/api-core/src /app/api-core/src
 COPY apps/api-core/README.md /app/api-core/README.md
 
+# Copy shared libraries
+COPY libs/py-common/src/ /app/libs/py-common/src/
+
 # Install api-core in editable mode
 RUN pip install --no-cache-dir -e /app/api-core
 
@@ -33,8 +36,8 @@ RUN grep -v "^-e ../api-core" /app/requirements.txt > /app/requirements-docker.t
 # Copy integration-worker source code
 COPY apps/integration-worker/src /app/src
 
-# Set Python path to include both src directories
-ENV PYTHONPATH=/app/src:/app/api-core/src
+# Set Python path to include src directories and shared libraries
+ENV PYTHONPATH=/app/src:/app/api-core/src:/app/libs/py-common/src
 
 # Create non-root user for security
 RUN useradd -m -u 1000 celeryuser && \
