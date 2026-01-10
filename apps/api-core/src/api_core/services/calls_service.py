@@ -156,11 +156,41 @@ class CallsService:
         if request.ended_at is not None:
             update_data["ended_at"] = request.ended_at
 
+        # Track previous status to detect completion
+        previous_status = call.status
+        previous_duration = call.duration_seconds
+
         if update_data:
             updated_call = await self._repo.update(call_id, **update_data)
             if not updated_call:
                 raise NotFoundError(resource="Call", resource_id=call_id)
             call = updated_call
+
+        # Trigger usage aggregation if call was just completed
+        # Check if status changed to "completed" and has duration
+        if (
+            call.status == "completed"
+            and call.duration_seconds
+            and (previous_status != "completed" or previous_duration != call.duration_seconds)
+        ):
+            try:
+                # Import here to avoid circular dependencies
+                from api_core.celery_client import send_usage_aggregation_task
+
+                # Trigger background job to aggregate usage
+                # The task will determine the billing period from the subscription
+                task_id = send_usage_aggregation_task(user_id=call.user_id)
+                logger.info(
+                    f"Triggered usage aggregation task {task_id} for completed call {call_id} "
+                    f"(user: {call.user_id}, duration: {call.duration_seconds}s)"
+                )
+            except Exception as e:
+                # Don't fail the call update if aggregation fails
+                # The daily aggregation job will catch any missed calls
+                logger.error(
+                    f"Failed to trigger usage aggregation for call {call_id}: {e}",
+                    exc_info=True,
+                )
 
         return CallResponse(
             id=call.id,

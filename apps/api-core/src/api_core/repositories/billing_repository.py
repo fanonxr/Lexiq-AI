@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import and_, select
@@ -65,7 +66,7 @@ class SubscriptionRepository(BaseRepository[Subscription]):
 
     async def get_by_user_id(self, user_id: str) -> Optional[Subscription]:
         """
-        Get active subscription for a user.
+        Get active or trialing subscription for a user.
 
         Args:
             user_id: User ID
@@ -74,10 +75,17 @@ class SubscriptionRepository(BaseRepository[Subscription]):
             Subscription instance or None if not found
         """
         try:
+            from sqlalchemy.orm import selectinload
+            from sqlalchemy import or_
+            
             result = await self.session.execute(
                 select(Subscription)
+                .options(selectinload(Subscription.plan))  # Eagerly load plan relationship
                 .where(Subscription.user_id == user_id)
-                .where(Subscription.status == "active")
+                .where(or_(
+                    Subscription.status == "active",
+                    Subscription.status == "trialing"
+                ))
                 .order_by(Subscription.created_at.desc())
             )
             return result.scalar_one_or_none()
@@ -232,10 +240,16 @@ class SubscriptionRepository(BaseRepository[Subscription]):
                 else:
                     current_period_end = now + timedelta(days=30)
 
+            # Determine status: trialing if trial is active, otherwise active
+            now = datetime.utcnow()
+            subscription_status = "active"
+            if trial_end and trial_end > now:
+                subscription_status = "trialing"
+            
             subscription = await self.create(
                 user_id=user_id,
                 plan_id=plan_id,
-                status="active",
+                status=subscription_status,
                 billing_cycle=billing_cycle,
                 current_period_start=current_period_start,
                 current_period_end=current_period_end,
@@ -272,22 +286,41 @@ class SubscriptionRepository(BaseRepository[Subscription]):
             Updated subscription instance or None if not found
         """
         try:
-            subscription = await self.get_by_id(subscription_id)
+            from sqlalchemy.orm import selectinload
+            
+            # Eagerly load plan relationship to avoid greenlet_spawn error
+            result = await self.session.execute(
+                select(Subscription)
+                .options(selectinload(Subscription.plan))
+                .where(Subscription.id == subscription_id)
+            )
+            subscription = result.scalar_one_or_none()
             if not subscription:
                 return None
 
             if cancel_at_period_end:
                 # Mark for cancellation at period end
                 subscription.cancel_at_period_end = True
+                logger.info(
+                    f"Marked subscription {subscription_id} for cancellation at period end. "
+                    f"Status remains: {subscription.status}, cancel_at_period_end: {subscription.cancel_at_period_end}"
+                )
             else:
                 # Cancel immediately
                 subscription.status = "canceled"
                 subscription.canceled_at = datetime.utcnow()
                 subscription.cancel_at_period_end = False
+                logger.info(
+                    f"Canceled subscription {subscription_id} immediately. "
+                    f"Status: {subscription.status}, canceled_at: {subscription.canceled_at}"
+                )
 
             await self.session.flush()
             await self.session.refresh(subscription)
-            logger.info(f"Canceled subscription: {subscription_id}")
+            logger.info(
+                f"Canceled subscription: {subscription_id}. "
+                f"Final status: {subscription.status}, cancel_at_period_end: {subscription.cancel_at_period_end}"
+            )
             return subscription
 
         except SQLAlchemyError as e:
@@ -422,6 +455,66 @@ class InvoiceRepository(BaseRepository[Invoice]):
         except SQLAlchemyError as e:
             logger.error(f"Error getting invoices by status {status}: {e}")
             raise DatabaseError("Failed to retrieve invoices by status") from e
+
+    async def create_invoice(
+        self,
+        user_id: str,
+        subscription_id: Optional[str] = None,
+        invoice_number: str = "",
+        amount: Decimal = Decimal("0.00"),
+        currency: str = "USD",
+        due_date: Optional[datetime] = None,
+        items_json: Optional[str] = None,
+        payment_provider: Optional[str] = None,
+        payment_provider_invoice_id: Optional[str] = None,
+        **kwargs,
+    ) -> Invoice:
+        """
+        Create a new invoice.
+
+        Args:
+            user_id: User ID
+            subscription_id: Optional subscription ID
+            invoice_number: Invoice number
+            amount: Invoice amount
+            currency: Currency code
+            due_date: Due date
+            items_json: JSON string of invoice items
+            payment_provider: Payment provider name
+            payment_provider_invoice_id: Payment provider invoice ID
+            **kwargs: Additional invoice fields
+
+        Returns:
+            Created invoice instance
+
+        Raises:
+            DatabaseError: If database operation fails
+        """
+        try:
+            if due_date is None:
+                due_date = datetime.utcnow() + timedelta(days=30)
+
+            invoice = await self.create(
+                user_id=user_id,
+                subscription_id=subscription_id,
+                invoice_number=invoice_number,
+                amount=amount,
+                currency=currency,
+                due_date=due_date,
+                items_json=items_json,
+                payment_provider=payment_provider,
+                payment_provider_invoice_id=payment_provider_invoice_id,
+                status="draft",
+                **kwargs,
+            )
+
+            logger.info(f"Created invoice: {invoice.id} for user: {user_id}")
+            return invoice
+
+        except SQLAlchemyError as e:
+            logger.error(f"Error creating invoice: {e}")
+            await self.session.rollback()
+            raise DatabaseError("Failed to create invoice") from e
 
     async def mark_as_paid(
         self, invoice_id: str, paid_at: Optional[datetime] = None

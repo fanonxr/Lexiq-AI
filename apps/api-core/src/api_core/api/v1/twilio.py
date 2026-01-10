@@ -196,6 +196,29 @@ async def handle_twilio_webhook(
                     media_type="application/xml",
                 )
 
+            # Check if user has active subscription (blocks calls if subscription is canceled/inactive)
+            from api_core.services.billing_service import get_billing_service
+            
+            billing_service = get_billing_service(session)
+            can_make_calls, reason = await billing_service.can_user_make_calls(user.id)
+            
+            if not can_make_calls:
+                logger.warning(
+                    f"Call blocked for user {user.id} (firm: {firm.id}). Reason: {reason}. "
+                    f"CallSid: {CallSid}, From: {From}"
+                )
+                # Return TwiML with a message explaining the call cannot be completed
+                # and then hang up
+                return Response(
+                    content='<?xml version="1.0" encoding="UTF-8"?>'
+                           '<Response>'
+                           '<Say voice="alice">We apologize, but your subscription is not active. '
+                           'Please contact support to reactivate your account. Goodbye.</Say>'
+                           '<Hangup/>'
+                           '</Response>',
+                    media_type="application/xml",
+                )
+
             # Create call record in database
             calls_service = get_calls_service(session)
             call_request = CallCreateRequest(

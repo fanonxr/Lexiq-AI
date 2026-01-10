@@ -1,13 +1,14 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Link from "next/link";
-
-export const metadata: Metadata = {
-  title: "Pricing",
-  description: "Choose the right plan for your law firm. Flexible pricing for LexiqAI voice orchestration platform.",
-};
+import { fetchPlans, createCheckoutSession, type Plan } from "@/lib/api/billing";
+import { logger } from "@/lib/logger";
+import { useAuth } from "@/hooks/useAuth";
 
 interface PricingFeature {
   text: string;
@@ -104,6 +105,104 @@ const pricingTiers: PricingTier[] = [
  * Displays pricing tiers with features and usage limits
  */
 export default function PricingPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [processingPlan, setProcessingPlan] = useState<string | null>(null);
+
+  // Fetch plans from API
+  useEffect(() => {
+    async function loadPlans() {
+      try {
+        const fetchedPlans = await fetchPlans();
+        setPlans(fetchedPlans);
+      } catch (error) {
+        logger.error("Failed to fetch plans", error instanceof Error ? error : new Error(String(error)));
+        // Continue with static tiers if API fails
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadPlans();
+  }, []);
+
+  // Map tier name to plan ID
+  // Plans in database use lowercase names (starter, professional, enterprise)
+  // Frontend tiers use capitalized names (Starter, Professional, Enterprise)
+  const getPlanId = (tierName: string): string | null => {
+    if (plans.length === 0) {
+      logger.warn("No plans loaded from API");
+      return null;
+    }
+    
+    const plan = plans.find(
+      (p) => p.name.toLowerCase() === tierName.toLowerCase()
+    );
+    
+    if (!plan) {
+      logger.error(`Plan not found for tier: ${tierName}`, {
+        availablePlans: plans.map((p) => ({ name: p.name, id: p.id })),
+        requestedTier: tierName,
+      });
+    }
+    
+    return plan?.id || null;
+  };
+
+  // Handle checkout button click
+  const handleCheckout = async (tierName: string) => {
+    // Check if user is authenticated
+    if (!isAuthenticated) {
+      // Redirect to signup with checkout parameter
+      const signupUrl = `/signup?redirect=${encodeURIComponent(`/pricing?checkout=${tierName.toLowerCase()}`)}`;
+      router.push(signupUrl);
+      return;
+    }
+
+    const planId = getPlanId(tierName);
+    if (!planId) {
+      logger.error(`Plan not found for tier: ${tierName}`);
+      return;
+    }
+
+    try {
+      setProcessingPlan(tierName);
+      const session = await createCheckoutSession(planId);
+      // Redirect to Stripe Checkout
+      if (session.url) {
+        window.location.href = session.url;
+      } else {
+        throw new Error("No checkout URL returned");
+      }
+    } catch (error) {
+      logger.error("Failed to create checkout session", error instanceof Error ? error : new Error(String(error)));
+      // Show error to user (don't redirect to signup since they're already authenticated)
+    } finally {
+      setProcessingPlan(null);
+    }
+  };
+
+  // Handle automatic checkout after signup redirect
+  useEffect(() => {
+    // Wait for auth and plans to load
+    if (authLoading || isLoading || plans.length === 0) return;
+    
+    // Check if user is authenticated and has a checkout parameter
+    const checkoutPlan = searchParams.get("checkout");
+    if (checkoutPlan && isAuthenticated) {
+      // Remove checkout param from URL
+      const newUrl = new URL(window.location.href);
+      newUrl.searchParams.delete("checkout");
+      window.history.replaceState({}, "", newUrl.toString());
+      
+      // Automatically initiate checkout
+      handleCheckout(checkoutPlan);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, isLoading, isAuthenticated, plans.length, searchParams]);
+
   return (
     <div className="bg-white dark:bg-zinc-900 min-h-screen">
       <div className="container mx-auto px-4 py-16 sm:py-24">
@@ -190,7 +289,16 @@ export default function PricingPage() {
                   ))}
                 </div>
 
-                <Link href={tier.name === "Enterprise" ? "/contact" : "/signup"} className="block">
+                {tier.name === "Enterprise" ? (
+                  <Link href="/contact" className="block">
+                    <Button
+                      className="w-full"
+                      variant="outline"
+                    >
+                      {tier.cta}
+                    </Button>
+                  </Link>
+                ) : (
                   <Button
                     className={`w-full ${
                       tier.popular
@@ -198,10 +306,12 @@ export default function PricingPage() {
                         : ""
                     }`}
                     variant={tier.popular ? "default" : "outline"}
+                    onClick={() => handleCheckout(tier.name)}
+                    disabled={isLoading || processingPlan === tier.name}
                   >
-                    {tier.cta}
+                    {processingPlan === tier.name ? "Processing..." : tier.cta}
                   </Button>
-                </Link>
+                )}
               </CardContent>
             </Card>
           ))}

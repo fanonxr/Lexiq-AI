@@ -14,7 +14,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Mic, Settings, Menu, X, Bot, BookOpen, Calendar } from "lucide-react";
+import { LayoutDashboard, Mic, Settings, Menu, X, Bot, BookOpen, Calendar, CreditCard } from "lucide-react";
 import { clsx } from "clsx";
 
 export interface SidebarItem {
@@ -53,6 +53,7 @@ const defaultItems: SidebarItem[] = [
   { label: "Agent", href: "/agent", icon: <Bot className="h-5 w-5" /> },
   { label: "Knowledge Base", href: "/knowledge", icon: <BookOpen className="h-5 w-5" /> },
   { label: "Appointments", href: "/appointments", icon: <Calendar className="h-5 w-5" /> },
+  { label: "Billing", href: "/billing", icon: <CreditCard className="h-5 w-5" /> },
 ];
 
 /**

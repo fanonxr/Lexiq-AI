@@ -34,6 +34,7 @@ aiohttp = "^3.9.1"  # Required for async Azure Blob Storage client
 python-multipart = "^0.0.6"  # Required for FastAPI file uploads
 aio-pika = "^9.2.1"  # RabbitMQ publishing (document ingestion jobs)
 twilio = "^8.0.0"  # Twilio API for phone number management
+stripe = "^7.0.0"  # Stripe Python SDK for payment processing
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"
@@ -43,6 +44,8 @@ black = "^23.11.0"
 ruff = "^0.1.6"
 mypy = "^1.7.0"
 greenlet = "^3.0.0"  # Required for SQLAlchemy async operations
+responses = "^0.24.0"  # HTTP mocking for Stripe API tests
+pytest-mock = "^3.12.0"  # Enhanced mocking for pytest
 
 [build-system]
 requires = ["poetry-core"]
