@@ -151,6 +151,13 @@ services:
       # Twilio Webhook Security
       - TWILIO_VALIDATE_SIGNATURES=${TWILIO_VALIDATE_SIGNATURES:-true}
       - PYTHONPATH=/app/src:/app/libs/py-common/src
+      # Stripe Configuration
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_API_VERSION=${STRIPE_API_VERSION:-2024-11-20.acacia}
+      - BILLING_BASE_URL=${BILLING_BASE_URL:-http://localhost:3000}
+      - BILLING_CURRENCY=${BILLING_CURRENCY:-usd}
     command: uvicorn api_core.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

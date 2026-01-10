@@ -18,6 +18,9 @@ app = Celery(
         "integration_worker.tasks.webhook_processing",
         "integration_worker.tasks.webhook_management",
         "integration_worker.tasks.cleanup",
+        "integration_worker.tasks.usage_aggregation",
+        "integration_worker.tasks.billing_cycle",
+        "integration_worker.tasks.trial_monitoring",
     ],
 )
 
@@ -57,6 +60,21 @@ app.conf.beat_schedule = {
     "cleanup-sync-logs": {
         "task": "integration_worker.tasks.cleanup.cleanup_old_sync_logs",
         "schedule": crontab(hour=2, minute=0),  # Daily at 2:00 AM
+    },
+    # Aggregate call minutes for all active subscriptions daily
+    "aggregate-all-usage": {
+        "task": "integration_worker.tasks.usage_aggregation.aggregate_all_active_subscriptions",
+        "schedule": crontab(hour=3, minute=0),  # Daily at 3:00 AM
+    },
+    # Process billing cycle end for subscriptions ending today
+    "process-billing-cycles": {
+        "task": "integration_worker.tasks.billing_cycle.process_daily_billing_cycles",
+        "schedule": crontab(hour=4, minute=0),  # Daily at 4:00 AM (after usage aggregation)
+    },
+    # Check all active trial subscriptions for usage limits
+    "check-all-trials": {
+        "task": "integration_worker.tasks.trial_monitoring.check_all_trials",
+        "schedule": crontab(minute="*/15"),  # Every 15 minutes
     },
 }
 

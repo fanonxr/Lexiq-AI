@@ -282,6 +282,19 @@ See `.env.example` for all available environment variables. Key variables:
 
 **Internal API Key (Service-to-Service Auth):**
 - `INTERNAL_API_KEY_ENABLED` - Enable API-key auth for internal service endpoints (default: `false`)
+- `INTERNAL_API_KEY` - Shared secret API key for internal services (required if enabled)
+
+**Stripe (Payment Processing):**
+- `STRIPE_SECRET_KEY` - Stripe secret key (sk_test_... for test, sk_live_... for production)
+- `STRIPE_PUBLISHABLE_KEY` - Stripe publishable key (pk_test_... for test, pk_live_... for production)
+- `STRIPE_WEBHOOK_SECRET` - Stripe webhook signing secret (whsec_...) for verifying webhook events
+- `STRIPE_API_VERSION` - Stripe API version (default: `2024-11-20.acacia`)
+
+**Billing:**
+- `BILLING_BASE_URL` - Base URL for billing redirects (frontend URL, default: `http://localhost:3000`)
+- `BILLING_CURRENCY` - Default billing currency ISO code (default: `usd`)
+
+**📖 See [Stripe Setup Guide](docs/STRIPE_SETUP.md) for detailed setup instructions.**
 - `INTERNAL_API_KEY` - Shared secret API key for internal services (sent as `X-Internal-API-Key` header)
 - `COGNITIVE_ORCH_URL` - Cognitive Orchestrator service URL (default: `http://localhost:8001`)
 - `COGNITIVE_ORCH_API_KEY` - Internal API key for calling Cognitive Orchestrator (default: same as `INTERNAL_API_KEY`)

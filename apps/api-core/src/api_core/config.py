@@ -307,6 +307,85 @@ class CognitiveOrchSettings(BaseSettings):
     )
 
 
+class StripeSettings(BaseSettings):
+    """Stripe payment provider configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="STRIPE_", case_sensitive=False)
+
+    secret_key: Optional[str] = Field(
+        default=None,
+        description="Stripe secret key (sk_test_... for test, sk_live_... for production). Env var: STRIPE_SECRET_KEY"
+    )
+    publishable_key: Optional[str] = Field(
+        default=None,
+        description="Stripe publishable key (pk_test_... for test, pk_live_... for production). Env var: STRIPE_PUBLISHABLE_KEY"
+    )
+    webhook_secret: Optional[str] = Field(
+        default=None,
+        description="Stripe webhook signing secret (whsec_...). Env var: STRIPE_WEBHOOK_SECRET"
+    )
+    api_version: str = Field(
+        default="2024-11-20.acacia",
+        description="Stripe API version. Env var: STRIPE_API_VERSION"
+    )
+
+    @property
+    def is_configured(self) -> bool:
+        """Check if Stripe is properly configured."""
+        return bool(self.secret_key and self.publishable_key)
+
+    @property
+    def is_test_mode(self) -> bool:
+        """Check if using Stripe test mode."""
+        if not self.secret_key:
+            return True  # Default to test mode if not configured
+        return self.secret_key.startswith("sk_test_")
+
+    @property
+    def is_live_mode(self) -> bool:
+        """Check if using Stripe live mode."""
+        if not self.secret_key:
+            return False
+        return self.secret_key.startswith("sk_live_")
+
+
+class BillingSettings(BaseSettings):
+    """Billing and subscription configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="BILLING_", case_sensitive=False)
+
+    base_url: str = Field(
+        default="http://localhost:3000",
+        description="Base URL for billing redirects (frontend URL). Env var: BILLING_BASE_URL"
+    )
+    currency: str = Field(
+        default="usd",
+        description="Default billing currency (ISO 4217 code). Env var: BILLING_CURRENCY"
+    )
+    trial_days: int = Field(
+        default=3,
+        description="Default free trial period in days. Env var: BILLING_TRIAL_DAYS"
+    )
+    trial_max_minutes: int = Field(
+        default=200,
+        description="Maximum call minutes allowed during free trial. Env var: BILLING_TRIAL_MAX_MINUTES"
+    )
+
+    @field_validator("currency")
+    @classmethod
+    def validate_currency(cls, v: str) -> str:
+        """Validate currency code."""
+        valid_codes = ["usd", "eur", "gbp", "cad", "aud"]  # Add more as needed
+        if v.lower() not in valid_codes:
+            import warnings
+            warnings.warn(
+                f"Currency code '{v}' may not be supported. "
+                f"Supported codes: {', '.join(valid_codes)}",
+                UserWarning,
+            )
+        return v.lower()
+
+
 class Settings(BaseSettings):
     """Application settings."""
 
@@ -356,6 +435,8 @@ class Settings(BaseSettings):
     server: ServerSettings = Field(default_factory=ServerSettings)
     google: GoogleSettings = Field(default_factory=GoogleSettings)
     cognitive_orch: CognitiveOrchSettings = Field(default_factory=CognitiveOrchSettings)
+    stripe: StripeSettings = Field(default_factory=StripeSettings)
+    billing: BillingSettings = Field(default_factory=BillingSettings)
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -410,6 +491,8 @@ class Settings(BaseSettings):
                 "database-url": ("database", "url"),
                 "jwt-secret-key": ("jwt", "secret_key"),
                 "azure-ad-b2c-client-secret": ("azure_ad_b2c", "client_secret"),
+                "stripe-secret-key": ("stripe", "secret_key"),
+                "stripe-webhook-secret": ("stripe", "webhook_secret"),
             }
 
             for secret_name, (section, key) in secret_mapping.items():
@@ -424,6 +507,22 @@ class Settings(BaseSettings):
                     elif section == "azure_ad_b2c":
                         # Update client secret
                         self.azure_ad_b2c.client_secret = secret.value
+                    elif section == "stripe":
+                        # Update Stripe settings
+                        if key == "secret_key":
+                            self.stripe = StripeSettings(
+                                secret_key=secret.value,
+                                publishable_key=self.stripe.publishable_key,
+                                webhook_secret=self.stripe.webhook_secret,
+                                api_version=self.stripe.api_version,
+                            )
+                        elif key == "webhook_secret":
+                            self.stripe = StripeSettings(
+                                secret_key=self.stripe.secret_key,
+                                publishable_key=self.stripe.publishable_key,
+                                webhook_secret=secret.value,
+                                api_version=self.stripe.api_version,
+                            )
                 except Exception as e:
                     # Log warning but don't fail - secrets might not exist
                     import logging
@@ -463,6 +562,21 @@ class Settings(BaseSettings):
             if self.internal_api_key_enabled and not self.internal_api_key:
                 raise ValueError(
                     "INTERNAL_API_KEY must be set when INTERNAL_API_KEY_ENABLED=true (internal endpoints protection)."
+                )
+            # Validate Stripe configuration in production
+            if self.stripe.is_configured and self.stripe.is_test_mode:
+                import warnings
+                warnings.warn(
+                    "Stripe is configured with test mode keys in production. "
+                    "Use live mode keys (sk_live_...) for production.",
+                    UserWarning,
+                )
+            if not self.stripe.is_configured:
+                import warnings
+                warnings.warn(
+                    "Stripe is not configured. Payment processing will not work. "
+                    "Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY environment variables.",
+                    UserWarning,
                 )
 
 

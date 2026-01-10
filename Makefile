@@ -347,6 +347,18 @@ migrate-stamp: ## Mark database as being at a specific revision (usage: make mig
 	fi
 	cd apps/api-core && $(ALEMBIC_CMD) stamp $(REVISION)
 
+migrate-stamp-local: ## Mark local database as being at a specific revision (usage: make migrate-stamp-local REVISION=abc123)
+	@if [ -z "$(REVISION)" ]; then \
+		echo "Error: REVISION is required. Usage: make migrate-stamp-local REVISION=abc123"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make venv-setup && make venv-install' first"; \
+		exit 1; \
+	fi
+	@echo "Stamping local database to revision $(REVISION)..."
+	cd apps/api-core && DATABASE_URL="postgresql://admin:password@localhost:5432/lexiqai_local" $(ALEMBIC_CMD) stamp $(REVISION)
+
 db-reset: ## Reset database by deleting all rows (keeps schema intact)
 	@if [ ! -f "$(VENV_ACTIVATE)" ]; then \
 		echo "⚠️  Virtual environment not found. Run 'make api-venv-setup && make api-venv-install' first"; \
@@ -827,6 +839,11 @@ generate-api-key-env: ## Generate internal API key in .env format
 generate-api-key-docker: ## Generate internal API key in docker-compose format
 	@echo "Generating internal API key in docker-compose format..."
 	@python3 tools/scripts/generate_internal_api_key.py --format docker
+
+
+stripe-listen-webhook:
+	@echo "Listening for Stripe webhook..."
+	@stripe listen --forward-to localhost:8000/api/v1/billing/webhook/stripe
 
 # Development utilities
 clean: ## Clean build artifacts and temporary files

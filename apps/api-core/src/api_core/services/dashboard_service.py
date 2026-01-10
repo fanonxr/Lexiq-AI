@@ -116,9 +116,18 @@ class DashboardService:
             days_until_renewal = max(0, delta.days)
 
         # Get plan name
+        # Plan should be eagerly loaded via selectinload in repository
         plan_name = None
         if subscription.plan:
             plan_name = subscription.plan.display_name or subscription.plan.name
+        elif subscription.plan_id:
+            # Fallback: load plan if relationship wasn't loaded
+            try:
+                plan = await self.billing_repository.plans.get_by_id(subscription.plan_id)
+                if plan:
+                    plan_name = plan.display_name or plan.name
+            except Exception as e:
+                logger.warning(f"Error loading plan for subscription: {e}")
 
         return SubscriptionStats(
             has_active_subscription=True,
@@ -275,7 +284,8 @@ class DashboardService:
 
         # Calculate total spent
         total_spent = sum(float(inv.amount) for inv in invoices if inv.status == "paid")
-        currency = invoices[0].currency if invoices else "USD"
+        # Safely get currency from first invoice, default to USD
+        currency = invoices[0].currency if invoices and len(invoices) > 0 else "USD"
 
         return BillingStats(
             total_invoices=total_invoices,

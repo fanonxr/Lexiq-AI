@@ -24,6 +24,7 @@ export default function DashboardLayout({
     if (pathname === "/dashboard") return "Dashboard";
     if (pathname.startsWith("/recordings")) return "Recordings";
     if (pathname.startsWith("/settings")) return "Settings";
+    if (pathname.startsWith("/billing")) return "Billing";
     return "Dashboard";
   };
 

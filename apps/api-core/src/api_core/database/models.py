@@ -56,6 +56,11 @@ class User(Base):
     )
     google_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
 
+    # Stripe integration
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(
+        String(255), unique=True, index=True, nullable=True
+    )
+
     # Account status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -155,6 +160,10 @@ class Plan(Base):
     max_calls_per_month: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_users: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_storage_gb: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    # Usage-based billing (minutes tracking)
+    included_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 500, 2000, or None for unlimited
+    overage_rate_per_minute: Mapped[Optional[Numeric]] = mapped_column(Numeric(10, 4), nullable=True)  # 0.18, 0.15, etc.
 
     # Plan status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
