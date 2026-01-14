@@ -71,50 +71,60 @@ func resample(samples []int16, inputRate, outputRate int) []int16 {
 }
 
 // linearToMulaw converts a 16-bit linear PCM sample to 8-bit μ-law
-// G.711 μ-law encoding algorithm
+// G.711 μ-law encoding algorithm (ITU-T G.711 standard)
 func linearToMulaw(sample int16) byte {
-	// Get sign bit (0x80 if negative, 0x00 if positive)
-	sign := int16(0)
+	const (
+		clip = 8159  // Maximum magnitude to clip input (14-bit range)
+		bias = 0x21 // Bias value (33 decimal)
+	)
+
+	var sign byte
+	magnitude := int32(sample)
+	
+	// Get sign and make magnitude positive
 	if sample < 0 {
 		sign = 0x80
-		sample = -sample
+		magnitude = -magnitude
+	} else {
+		sign = 0x00
 	}
 
-	// Bias the sample
-	sample += 0x84
+	// Clip magnitude
+	if magnitude > clip {
+		magnitude = clip
+	}
 
-	// Find the segment (0-7)
-	segment := int16(0)
-	if sample >= 0x100 {
-		segment = 1
-	}
-	if sample >= 0x200 {
-		segment = 2
-	}
-	if sample >= 0x400 {
-		segment = 3
-	}
-	if sample >= 0x800 {
-		segment = 4
-	}
-	if sample >= 0x1000 {
-		segment = 5
-	}
-	if sample >= 0x2000 {
-		segment = 6
-	}
-	if sample >= 0x4000 {
+	// Add bias
+	magnitude += bias
+
+	// Find segment (exponent) by finding the highest set bit position
+	// Segments: 0=33-63, 1=64-127, 2=128-255, 3=256-511, 4=512-1023, 5=1024-2047, 6=2048-4095, 7=4096-8191
+	var segment byte
+	temp := magnitude
+	if temp >= 0x1000 { // 4096
 		segment = 7
+	} else if temp >= 0x800 { // 2048
+		segment = 6
+	} else if temp >= 0x400 { // 1024
+		segment = 5
+	} else if temp >= 0x200 { // 512
+		segment = 4
+	} else if temp >= 0x100 { // 256
+		segment = 3
+	} else if temp >= 0x80 { // 128
+		segment = 2
+	} else if temp >= 0x40 { // 64
+		segment = 1
+	} else {
+		segment = 0
 	}
 
-	// Calculate mantissa (4 bits)
-	mantissa := (sample >> (segment + 3)) & 0x0F
+	// Calculate mantissa (4 bits) - shift by (segment + 1)
+	mantissa := byte((magnitude >> (segment + 1)) & 0x0F)
 
-	// Combine sign, segment, and mantissa
-	// μ-law format: sign (1 bit) | segment (3 bits) | mantissa (4 bits)
-	result := byte(0x7F ^ (sign | (segment << 4) | mantissa))
-
-	return result
+	// Combine sign, segment, and mantissa, then invert all bits
+	ulawByte := sign | (segment << 4) | mantissa
+	return ^ulawByte
 }
 
 // ConvertPCMUToPCM converts G.711 PCMU (μ-law) to linear PCM
@@ -138,24 +148,28 @@ func ConvertPCMUToPCM(pcmuData []byte) ([]byte, error) {
 
 // mulawToLinear converts an 8-bit μ-law sample to 16-bit linear PCM
 func mulawToLinear(mulawByte byte) int16 {
-	// Invert bits
+	// Invert all bits first (μ-law uses inverted representation)
 	mulawByte = ^mulawByte
 
 	// Extract sign, segment, and mantissa
-	sign := int16((mulawByte >> 7) & 0x01)
-	segment := int16((mulawByte >> 4) & 0x07)
-	mantissa := int16(mulawByte & 0x0F)
+	sign := mulawByte & 0x80
+	segment := int32((mulawByte >> 4) & 0x07)
+	mantissa := int32(mulawByte & 0x0F)
 
-	// Reconstruct linear value
-	linear := int16(33 + (2 * mantissa))
-	linear <<= segment
-	linear -= 33
+	// Reconstruct linear value using the standard formula
+	// step = (mantissa << 1 + 33) << segment
+	// magnitude = step - bias
+	// Or equivalently: step = (mantissa << (segment + 1)) + (33 << segment)
+	// magnitude = step - 33
+	step := mantissa << (segment + 1)
+	step += int32(33) << segment
+	magnitude := step - 33 // bias
 
+	// Apply sign
 	if sign != 0 {
-		linear = -linear
+		return int16(-magnitude)
 	}
-
-	return linear
+	return int16(magnitude)
 }
 
 // NormalizeAudio normalizes audio samples to prevent clipping

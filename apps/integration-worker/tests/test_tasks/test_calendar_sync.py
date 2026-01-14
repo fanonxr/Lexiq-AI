@@ -71,7 +71,7 @@ class TestCalendarSyncTasks:
         mock_integration2.id = str(uuid.uuid4())
         mock_integration2.integration_type = "google"
         
-        with patch('integration_worker.tasks.calendar_sync.CalendarIntegrationRepository') as mock_repo_class:
+        with patch('integration_worker.database.repositories.CalendarIntegrationRepository') as mock_repo_class:
             mock_repo = MagicMock()
             
             async def mock_get_all_active():
@@ -81,11 +81,14 @@ class TestCalendarSyncTasks:
             mock_repo_class.return_value = mock_repo
             
             with patch.object(sync_outlook_calendar, 'delay') as mock_outlook_delay:
-                result = sync_all_calendars()
+                with patch.object(sync_google_calendar, 'delay') as mock_google_delay:
+                    result = sync_all_calendars()
         
-        # Should trigger sync for outlook integration
-        assert result['synced'] == 1  # Only outlook (google is Phase 5)
+        # Should trigger sync for both outlook and google integrations
+        assert result['synced'] == 2  # Both outlook and google
         assert result['errors'] == 0
+        mock_outlook_delay.assert_called_once()
+        mock_google_delay.assert_called_once()
     
     def test_sync_google_calendar_task_signature(self):
         """Test that sync_google_calendar task is properly configured."""

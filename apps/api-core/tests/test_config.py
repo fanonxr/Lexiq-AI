@@ -40,8 +40,13 @@ def test_azure_ad_b2c_settings():
     assert "test-tenant" in settings.authority
 
 
-def test_azure_ad_b2c_settings_not_configured():
+def test_azure_ad_b2c_settings_not_configured(monkeypatch):
     """Test Azure AD B2C settings when not configured."""
+    # Clear any environment variables that might affect this test
+    monkeypatch.delenv("AZURE_AD_B2C_TENANT_ID", raising=False)
+    monkeypatch.delenv("AZURE_AD_B2C_CLIENT_ID", raising=False)
+    monkeypatch.delenv("AZURE_AD_B2C_POLICY_SIGNUP_SIGNIN", raising=False)
+    
     settings = AzureADB2CSettings()
     assert settings.is_configured is False
     assert settings.authority is None
@@ -57,15 +62,16 @@ def test_jwt_settings():
 
 def test_cors_settings():
     """Test CORS settings."""
-    # Test with string
-    settings = CorsSettings(origins="http://localhost:3000,http://localhost:3001")
+    # Test with string (using origins_str which is the actual field name)
+    settings = CorsSettings(origins_str="http://localhost:3000,http://localhost:3001")
     assert len(settings.origins) == 2
     assert "http://localhost:3000" in settings.origins
     assert "http://localhost:3001" in settings.origins
 
-    # Test with list
-    settings = CorsSettings(origins=["http://localhost:3000"])
+    # Test with single origin string
+    settings = CorsSettings(origins_str="http://localhost:3000")
     assert len(settings.origins) == 1
+    assert "http://localhost:3000" in settings.origins
 
 
 def test_settings_environment():
@@ -98,10 +104,10 @@ def test_get_settings_singleton():
 
 def test_settings_from_env(monkeypatch):
     """Test loading settings from environment variables."""
-    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv("DEBUG", "true")
     monkeypatch.setenv("DATABASE_URL", "postgresql://test:test@localhost/testdb")
-    monkeypatch.setenv("CORS_ORIGINS", "http://test.com,http://test2.com")
+    monkeypatch.setenv("CORS_ORIGINS_STR", "http://test.com,http://test2.com")
 
     settings = Settings()
     assert settings.environment == Environment.STAGING

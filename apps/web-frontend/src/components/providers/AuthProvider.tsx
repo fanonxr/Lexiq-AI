@@ -342,7 +342,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
               "See /docs/connection/AZURE_AD_SETUP.md for detailed instructions."
             );
             setError(error);
-            logger.error("Consent required - check Azure Portal configuration", error);
+            logger.error("Consent required - check Azure Portal configuration", error instanceof Error ? error : new Error(String(error)));
             return null;
           }
 
@@ -374,7 +374,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
                 "See /docs/connection/GRANT_CONSENT_QUICK.md for instructions."
               );
               setError(error);
-              logger.error("Consent required after interactive attempt", error);
+              logger.error("Consent required after interactive attempt", error instanceof Error ? error : new Error(String(error)));
               return null;
             }
 
@@ -757,7 +757,9 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         await logoutApi();
       } catch (backendError) {
         // Backend logout is optional - continue with client-side logout even if it fails
-        logger.debug("Backend logout call failed (non-critical)", backendError instanceof Error ? backendError : new Error(String(backendError)));
+        logger.debug("Backend logout call failed (non-critical)", {
+          error: backendError instanceof Error ? backendError.message : String(backendError),
+        });
       }
       
       // If we have MSAL account (Microsoft), logout from MSAL
@@ -775,7 +777,9 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
           await instance.logoutPopup(logoutConfig);
         } catch (msalError) {
           // MSAL logout failure is non-critical - continue with token removal
-          logger.debug("MSAL logout failed (non-critical)", msalError instanceof Error ? msalError : new Error(String(msalError)));
+          logger.debug("MSAL logout failed (non-critical)", {
+            error: msalError instanceof Error ? msalError.message : String(msalError),
+          });
         }
       }
       

@@ -1,0 +1,62 @@
+# Shared Resources Configuration
+# This file contains configuration for resources shared across all environments (dev, staging, prod)
+# Copy this file to shared.tfvars and update with your actual values
+# DO NOT commit shared.tfvars to version control if it contains sensitive information
+
+# Project Configuration
+project_name   = "lexiqai"  # Base name for all resources (must be lowercase, alphanumeric, hyphens only)
+azure_location = "westus"   # Azure region for shared resources (e.g., "eastus", "westus", "westus2")
+                             # Should match your primary environment location for best performance
+
+# DNS Configuration (Optional)
+# Only configure if you're using Azure DNS to manage your domain
+# Leave empty if using external DNS provider (e.g., Cloudflare, Route53, GoDaddy)
+dns_zone_name = ""  # e.g., "lexiqai.com" or "example.com"
+                    # If set, Azure DNS zone will be created in the shared resource group
+                    # You'll need to update your domain registrar's name servers to point to Azure DNS
+
+# GitHub Configuration
+# These settings configure the GitHub OIDC application for CI/CD
+github_repository = "fanonxr/Lexiq-AI"  # Your GitHub repository in format: owner/repo
+                                         # Example: "your-org/your-repo" or "username/repo-name"
+
+# GitHub Environments (Recommended)
+# These should match the environments defined in your GitHub Actions workflow
+# The workflow uses: dev, staging, prod
+github_environments = ["dev", "staging", "prod"]
+
+# Legacy Branch Support (Deprecated)
+# Use github_environments instead. Only use this if you're not using GitHub environments.
+# github_branch = "*"  # Options: "*" (all branches), "develop", "staging", "prod", "master"
+
+# Environment Resource Group Names
+# These should match the resource groups created by your environment-specific Terraform configs
+# Format: {project_name}-rg-{environment}
+environment_resource_group_names = {
+  dev     = "lexiqai-rg-dev"      # Dev environment resource group
+  staging = "lexiqai-rg-staging"  # Staging environment resource group
+  prod    = "lexiqai-rg-prod"     # Production environment resource group
+}
+
+# Common Tags
+# These tags will be applied to all shared resources
+common_tags = {
+  Project     = "LexiqAI"      # Project name
+  ManagedBy   = "Terraform"    # Indicates infrastructure is managed by Terraform
+  Environment = "shared"       # Environment identifier (always "shared" for shared resources)
+  CostCenter  = "Engineering"  # Cost center for billing/accounting
+  # Add any additional tags as needed:
+  # Team       = "Platform"
+  # Owner      = "devops@example.com"
+  # Purpose    = "Shared infrastructure"
+}
+
+# Note: subscription_id and tenant_id are NOT required here
+# They are automatically sourced from:
+#   1. Environment variables: TF_VAR_subscription_id, TF_VAR_tenant_id
+#   2. Azure CLI: az account show (if logged in)
+#   3. .env file (if using make commands)
+#
+# To set manually:
+# export TF_VAR_subscription_id="<your-subscription-id>"
+# export TF_VAR_tenant_id="<your-tenant-id>"

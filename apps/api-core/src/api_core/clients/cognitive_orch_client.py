@@ -6,8 +6,6 @@ from py_common.clients import InternalAPIClient
 
 from api_core.config import get_settings
 
-settings = get_settings()
-
 
 class CognitiveOrchClient:
     """
@@ -19,6 +17,7 @@ class CognitiveOrchClient:
     
     def __init__(self):
         """Initialize the Cognitive Orchestrator client."""
+        settings = get_settings()
         self._client = InternalAPIClient(
             base_url=settings.cognitive_orch.url,
             api_key=settings.cognitive_orch.api_key,

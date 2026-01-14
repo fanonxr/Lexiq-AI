@@ -7,7 +7,7 @@ resource "azurerm_storage_account" "main" {
   location                 = var.location
   account_tier             = var.account_tier
   account_replication_type = var.account_replication_type
-  account_kind             = "StorageV2"  # General Purpose V2
+  account_kind             = "StorageV2" # General Purpose V2
 
   # Enable HTTPS only
   https_traffic_only_enabled = true
@@ -44,15 +44,35 @@ resource "azurerm_storage_account" "main" {
   tags = merge(
     var.common_tags,
     {
-      Name = "${var.project_name}-storage-${var.environment}"
+      Name    = "${var.project_name}-storage-${var.environment}"
       Purpose = "RAG Document Storage"
     }
   )
 }
 
-# Note: Containers are NOT created in Terraform
+# Note: Blob Containers are NOT created in Terraform
 # Containers are created dynamically in code when firms are created:
 # - Container name: `firm-{firm_id}-documents`
 # - Created via Azure SDK/API when firm is created
 # - Access controlled via Managed Identity with container-level RBAC
 
+# Azure File Shares for Container Apps persistent storage
+# These are used for persistent volumes in Container Apps (Qdrant, RabbitMQ, etc.)
+
+resource "azurerm_storage_share" "qdrant" {
+  name                 = "qdrant-storage"
+  storage_account_name = azurerm_storage_account.main.name
+  quota                = var.environment == "prod" ? 100 : 10 # GB
+
+  # Access tier (Hot for frequently accessed data)
+  access_tier = "Hot"
+}
+
+resource "azurerm_storage_share" "rabbitmq" {
+  name                 = "rabbitmq-storage"
+  storage_account_name = azurerm_storage_account.main.name
+  quota                = var.environment == "prod" ? 50 : 5 # GB
+
+  # Access tier (Hot for frequently accessed data)
+  access_tier = "Hot"
+}

@@ -82,5 +82,11 @@ class TestInternalAuthDep:
         """Test that InternalAuthDep is a FastAPI dependency."""
         from fastapi import Depends
         
-        assert isinstance(InternalAuthDep, Depends)
+        # Check that it was created with Depends by checking the type name
+        assert type(InternalAuthDep).__name__ == "Depends"
+        # Check that it has the dependency property
+        assert hasattr(InternalAuthDep, "dependency")
+        # Verify the dependency is the require_internal_api_key function
+        from cognitive_orch.auth.internal_service import require_internal_api_key
+        assert InternalAuthDep.dependency == require_internal_api_key
 

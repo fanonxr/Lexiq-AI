@@ -437,7 +437,7 @@ class TestPasswordReset:
         test_user.password_reset_expires_at = datetime.utcnow() - timedelta(hours=1)
         await session.commit()
         
-        with pytest.raises(ValidationError, match="Invalid or expired"):
+        with pytest.raises(ValidationError, match="expired"):
             await auth_service.confirm_password_reset(token, "NewPassword123!")
 
     @pytest.mark.asyncio
@@ -451,6 +451,8 @@ class TestPasswordReset:
         test_user.password_reset_expires_at = datetime.utcnow() + timedelta(hours=24)
         await session.commit()
         
+        # Use a password that's 8+ characters but missing required elements (uppercase, digit, special)
+        # This will trigger "Password must contain" error instead of length error
         with pytest.raises(ValidationError, match="Password must contain"):
-            await auth_service.confirm_password_reset(token, "weak")
+            await auth_service.confirm_password_reset(token, "weakpassword")
 

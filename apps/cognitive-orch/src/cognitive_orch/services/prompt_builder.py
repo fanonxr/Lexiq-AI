@@ -201,5 +201,11 @@ def build_system_prompt(
         ... )
     """
     builder = PromptBuilder()
-    return builder.build_system_prompt(firm_persona, client_dossier, include_tool_instructions)
+    is_new_client = client_dossier is None
+    return builder.build_system_prompt(
+        firm_persona, 
+        client_dossier=client_dossier, 
+        is_new_client=is_new_client,
+        include_tool_instructions=include_tool_instructions
+    )
 

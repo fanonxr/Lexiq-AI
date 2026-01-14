@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
 
 from integration_worker.database.repositories import (
@@ -19,10 +19,10 @@ class TestCalendarIntegrationRepository:
         """Test get_by_id method."""
         repo = CalendarIntegrationRepository(mock_db_session)
         
-        # Mock query result
-        mock_result = AsyncMock()
+        # Mock query result - execute is async, but scalar_one_or_none is not
+        mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_calendar_integration
-        mock_db_session.execute.return_value = mock_result
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
         
         result = await repo.get_by_id(str(mock_calendar_integration.id))
         
@@ -34,9 +34,9 @@ class TestCalendarIntegrationRepository:
         """Test get_by_user_and_type method."""
         repo = CalendarIntegrationRepository(mock_db_session)
         
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_calendar_integration
-        mock_db_session.execute.return_value = mock_result
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
         
         result = await repo.get_by_user_and_type(
             str(mock_calendar_integration.user_id),
@@ -50,11 +50,11 @@ class TestCalendarIntegrationRepository:
         """Test get_all_active method."""
         repo = CalendarIntegrationRepository(mock_db_session)
         
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_scalars = MagicMock()
         mock_scalars.all.return_value = [mock_calendar_integration]
         mock_result.scalars.return_value = mock_scalars
-        mock_db_session.execute.return_value = mock_result
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
         
         result = await repo.get_all_active()
         
@@ -69,11 +69,11 @@ class TestCalendarIntegrationRepository:
         expiring_integration = mock_calendar_integration
         expiring_integration.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
         
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_scalars = MagicMock()
         mock_scalars.all.return_value = [expiring_integration]
         mock_result.scalars.return_value = mock_scalars
-        mock_db_session.execute.return_value = mock_result
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
         
         threshold = datetime.now(timezone.utc) + timedelta(hours=24)
         result = await repo.get_with_expiring_tokens(threshold)
@@ -90,9 +90,9 @@ class TestAppointmentsRepository:
         """Test get_by_idempotency_key method."""
         repo = AppointmentsRepository(mock_db_session)
         
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_appointment
-        mock_db_session.execute.return_value = mock_result
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
         
         result = await repo.get_by_idempotency_key("outlook_test-123")
         

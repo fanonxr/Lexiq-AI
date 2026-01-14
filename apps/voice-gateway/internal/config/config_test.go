@@ -157,6 +157,8 @@ func TestConfig_ResilienceDefaults(t *testing.T) {
 func TestConfig_ObservabilityDefaults(t *testing.T) {
 	os.Setenv("DEEPGRAM_API_KEY", "test-deepgram-key")
 	os.Setenv("CARTESIA_API_KEY", "test-cartesia-key")
+	// Clear LOG_LEVEL to ensure we get the default
+	os.Unsetenv("LOG_LEVEL")
 	defer os.Unsetenv("DEEPGRAM_API_KEY")
 	defer os.Unsetenv("CARTESIA_API_KEY")
 
@@ -166,6 +168,7 @@ func TestConfig_ObservabilityDefaults(t *testing.T) {
 	}
 
 	// Check observability defaults
+	// The default should be "info" (lowercase) as defined in config.go
 	if cfg.LogLevel != "info" {
 		t.Errorf("Expected default LogLevel 'info', got '%s'", cfg.LogLevel)
 	}

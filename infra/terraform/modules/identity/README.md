@@ -12,7 +12,7 @@ Terraform module for creating Azure Managed Identities and role assignments.
 - Role assignments for:
   - Resource group access (Contributor)
   - PostgreSQL Flexible Server access (Contributor)
-  - Redis Cache access (Contributor)
+  - Redis Cache access (Contributor) - **Note: No longer needed** (Redis is now containerized in Container Apps) - **Note: No longer needed** (Redis is now containerized in Container Apps)
 
 ## Usage
 
@@ -27,7 +27,8 @@ module "identity" {
 
   # Role assignments
   postgres_server_id = module.database.server_id
-  redis_cache_id     = module.cache.cache_id
+  # redis_cache_id is optional - not needed for containerized Redis
+  # redis_cache_id     = module.cache.cache_id  # Only if using Azure Cache for Redis
 
   common_tags = var.common_tags
 }

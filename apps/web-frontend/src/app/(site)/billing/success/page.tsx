@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,10 +8,10 @@ import { verifyCheckoutSession } from "@/lib/api/billing";
 import { logger } from "@/lib/logger";
 
 /**
- * Billing success page
+ * Billing success page content
  * Shown after successful Stripe checkout
  */
-export default function BillingSuccessPage() {
+function BillingSuccessPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [status, setStatus] = useState<"loading" | "success" | "error" | "verifying">("loading");
@@ -90,7 +90,7 @@ export default function BillingSuccessPage() {
           }, 1000);
         }
       } catch (error) {
-        logger.error("Error verifying checkout session", error);
+        logger.error("Error verifying checkout session", error instanceof Error ? error : new Error(String(error)));
         setStatus("error");
         setMessage(
           "We're having trouble verifying your payment. " +
@@ -187,5 +187,35 @@ export default function BillingSuccessPage() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Billing success page
+ * Wrapped in Suspense for static export compatibility
+ */
+export default function BillingSuccessPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-900 px-4 py-12 sm:px-6 lg:px-8">
+        <div className="w-full max-w-md space-y-8">
+          <div className="text-center">
+            <div className="space-y-4">
+              <div className="flex justify-center">
+                <Loader2 className="h-12 w-12 animate-spin text-zinc-600 dark:text-zinc-400" />
+              </div>
+              <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+                Processing your payment...
+              </h2>
+              <p className="text-zinc-600 dark:text-zinc-400">
+                Please wait while we confirm your subscription.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    }>
+      <BillingSuccessPageContent />
+    </Suspense>
   );
 }

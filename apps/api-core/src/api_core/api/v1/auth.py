@@ -4,12 +4,13 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.exc import SQLAlchemyError
 
 from api_core.auth.dependencies import get_current_user
 from api_core.auth.jwt import create_access_token, create_refresh_token, refresh_access_token
 from api_core.auth.token_validator import TokenValidationResult
 from api_core.config import get_settings
-from api_core.exceptions import AuthenticationError, RateLimitError, ValidationError
+from api_core.exceptions import AuthenticationError, DatabaseError, RateLimitError, ValidationError
 from api_core.services.rate_limit_service import get_rate_limit_service
 from api_core.models.auth import (
     ConfirmPasswordResetRequest,
@@ -54,23 +55,22 @@ async def login(request: LoginRequest, http_request: Request):
 
     Rate limited to 5 attempts per 15 minutes per email address.
     """
-    # Rate limiting: 5 attempts per 15 minutes per email
-    rate_limit_service = get_rate_limit_service()
-    rate_limit_key = f"login:{request.email.lower().strip()}"
-    max_attempts = 5
-    window_seconds = 15 * 60  # 15 minutes
-    
-    is_allowed, retry_after = await rate_limit_service.check_rate_limit(
-        rate_limit_key, max_attempts, window_seconds
-    )
-    
-    if not is_allowed:
-        raise RateLimitError(
-            message=f"Too many login attempts. Please try again in {retry_after} seconds.",
-            retry_after=retry_after,
-        )
-    
     try:
+        # Rate limiting: 5 attempts per 15 minutes per email
+        rate_limit_service = get_rate_limit_service()
+        rate_limit_key = f"login:{request.email.lower().strip()}"
+        max_attempts = 5
+        window_seconds = 15 * 60  # 15 minutes
+        
+        is_allowed, retry_after = await rate_limit_service.check_rate_limit(
+            rate_limit_key, max_attempts, window_seconds
+        )
+        
+        if not is_allowed:
+            raise RateLimitError(
+                message=f"Too many login attempts. Please try again in {retry_after} seconds.",
+                retry_after=retry_after,
+            )
         async with get_session_context() as session:
             auth_service = get_auth_service(session)
             user = await auth_service.authenticate_user(request.email, request.password)
@@ -99,7 +99,14 @@ async def login(request: LoginRequest, http_request: Request):
         )
     except AuthenticationError as e:
         # Increment rate limit counter on failed login
-        await rate_limit_service.increment_attempt(rate_limit_key, window_seconds)
+        try:
+            rate_limit_service = get_rate_limit_service()
+            rate_limit_key = f"login:{request.email.lower().strip()}"
+            window_seconds = 15 * 60  # 15 minutes
+            await rate_limit_service.increment_attempt(rate_limit_key, window_seconds)
+        except Exception:
+            # If rate limiting fails, log but don't fail the request
+            logger.warning("Failed to increment rate limit counter", exc_info=True)
         logger.warning(f"Login failed for email {request.email}: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -112,6 +119,22 @@ async def login(request: LoginRequest, http_request: Request):
             detail=str(e),
             headers={"Retry-After": str(e.retry_after) if e.retry_after else "900"},
         ) from e
+    except (DatabaseError, SQLAlchemyError) as e:
+        # Database errors during authentication should be treated as authentication failures
+        # to avoid leaking database structure/errors, but log the actual error
+        logger.error(f"Database error during login for email {request.email}: {e}", exc_info=True)
+        try:
+            rate_limit_service = get_rate_limit_service()
+            rate_limit_key = f"login:{request.email.lower().strip()}"
+            window_seconds = 15 * 60  # 15 minutes
+            await rate_limit_service.increment_attempt(rate_limit_key, window_seconds)
+        except Exception:
+            # If rate limiting fails, log but don't fail the request
+            logger.warning("Failed to increment rate limit counter", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
     except Exception as e:
         logger.error(f"Unexpected error during login: {e}", exc_info=True)
         raise HTTPException(
@@ -252,6 +275,14 @@ async def confirm_password_reset(request: ConfirmPasswordResetRequest):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        )
+    except (DatabaseError, SQLAlchemyError) as e:
+        # Database errors during password reset should be treated as validation failures
+        # to avoid leaking database structure/errors, but log the actual error
+        logger.error(f"Database error during password reset confirmation: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired password reset token",
         )
     except Exception as e:
         logger.error(f"Error confirming password reset: {e}", exc_info=True)

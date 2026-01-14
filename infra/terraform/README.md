@@ -18,9 +18,9 @@ terraform/
 └── modules/                   # Reusable Terraform modules
     ├── network/               # VNet, subnets, NSGs
     ├── database/              # PostgreSQL Flexible Server
-    ├── cache/                 # Azure Cache for Redis
     ├── identity/              # Managed Identities
-    └── container-apps/        # Container Apps Environment
+    ├── container-apps/        # Container Apps Environment and services
+    └── storage/               # Azure Blob Storage
 ```
 
 ## Prerequisites
@@ -113,9 +113,9 @@ Modules are organized by resource type:
 
 - **network** - Virtual Network, subnets, NSGs (Step 4)
 - **database** - PostgreSQL Flexible Server (Step 5)
-- **cache** - Redis cache (Step 6)
 - **identity** - Managed Identities (Step 7)
-- **container-apps** - Container Apps Environment (Phase 2)
+- **container-apps** - Container Apps Environment and all containerized services (Step 8)
+  - Includes Redis (migrated from Azure Cache for Redis), Qdrant, RabbitMQ, and all application services
 
 Each module has its own README with usage examples.
 
@@ -191,6 +191,7 @@ terraform init -upgrade
 - ✅ Step 3: Azure Resource Group & Core Configuration
 - ✅ Step 4: Network Infrastructure
 - ✅ Step 5: PostgreSQL Database Infrastructure
-- ✅ Step 6: Redis Cache Infrastructure
+- ✅ Step 6: Redis Cache Infrastructure (Migrated to Container Apps)
 - ✅ Step 7: Managed Identities & Authentication
+- ✅ Step 8: Container Apps Infrastructure (Redis, Qdrant, RabbitMQ, and all application services)
 

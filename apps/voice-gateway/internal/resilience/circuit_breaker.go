@@ -97,7 +97,20 @@ func (cb *CircuitBreaker) RecordResult(success bool) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
+	// Check if we should transition from Open to HalfOpen
+	now := time.Now()
+	if cb.state == StateOpen && now.Sub(cb.lastFailTime) >= cb.resetTimeout {
+		cb.state = StateHalfOpen
+		cb.halfOpenCount = 0
+		cb.successCount = 0
+	}
+
 	cb.requestCount++
+
+	// If in HalfOpen state, increment halfOpenCount
+	if cb.state == StateHalfOpen {
+		cb.halfOpenCount++
+	}
 
 	if success {
 		cb.recordSuccess()
@@ -112,6 +125,11 @@ func (cb *CircuitBreaker) recordResult(success bool) {
 	defer cb.mu.Unlock()
 
 	cb.requestCount++
+
+	// If in HalfOpen state, increment halfOpenCount
+	if cb.state == StateHalfOpen {
+		cb.halfOpenCount++
+	}
 
 	if success {
 		cb.recordSuccess()
@@ -192,5 +210,8 @@ func (cb *CircuitBreaker) Reset() {
 	cb.failureCount = 0
 	cb.halfOpenCount = 0
 	cb.successCount = 0
+	cb.requestCount = 0
+	cb.failureCountTotal = 0
+	cb.lastFailTime = time.Time{}
 }
 

@@ -16,7 +16,9 @@ resource "azurerm_role_assignment" "postgres_contributor" {
 
 # Role Assignment: Redis Cache Contributor
 # Allows the identity to access Redis Cache
+# Note: This is only needed for Azure Cache for Redis, not for containerized Redis
 resource "azurerm_role_assignment" "redis_contributor" {
+  count                = var.redis_cache_id != null ? 1 : 0
   scope                = var.redis_cache_id
   role_definition_name = "Contributor"
   principal_id         = azurerm_user_assigned_identity.main.principal_id

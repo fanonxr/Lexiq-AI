@@ -131,6 +131,6 @@ class ConversationState(BaseModel):
 
     def model_dump_json(self, **kwargs) -> str:
         """Serialize to JSON with proper datetime handling."""
-        # Pydantic v2 handles datetime serialization automatically in mode="json"
-        return super().model_dump_json(mode="json", **kwargs)
+        # Pydantic v2 handles datetime serialization automatically
+        return super().model_dump_json(**kwargs)
 

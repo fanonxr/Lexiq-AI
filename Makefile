@@ -1,19 +1,10 @@
-# Load environment variables from .env.local if it exists
-ifneq (,$(wildcard .env.local))
-    include .env.local
+# Load environment variables from .env if it exists
+ifneq (,$(wildcard .env))
+    include .env
     export
 endif
 
 # Voice Gateway Commands
-voice-gateway-test: ## Run voice-gateway unit tests
-	@echo "Running Voice Gateway tests..."
-	cd apps/voice-gateway && go test ./... -v
-
-voice-gateway-test-cov: ## Run voice-gateway tests with coverage
-	@echo "Running Voice Gateway tests with coverage..."
-	cd apps/voice-gateway && go test ./... -v -coverprofile=coverage.out -covermode=atomic
-	cd apps/voice-gateway && go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated: apps/voice-gateway/coverage.html"
 
 voice-gateway-build: ## Build voice-gateway binary
 	@echo "Building Voice Gateway..."
@@ -35,7 +26,7 @@ voice-gateway-vendor: ## Vendor voice-gateway dependencies
 	@echo "Vendoring Voice Gateway dependencies..."
 	cd apps/voice-gateway && go mod vendor
 
-.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-voice-gateway docker-build-no-cache install test format lint terraform-init terraform-plan terraform-apply terraform-destroy frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp db-reset db-reset-local orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check voice-deps voice-build voice-run voice-test voice-test-cov voice-fmt voice-vet voice-lint voice-check voice-clean voice-health proto-compile proto-compile-go proto-clean-go generate-api-key generate-api-key-long generate-api-key-env generate-api-key-docker
+.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-voice-gateway docker-build-no-cache install test   api-core-test api-core-test-cov cognitive-orch-test document-ingestion-test integration-worker-test voice-gateway-test voice-gateway-test-cov format lint terraform-init terraform-plan terraform-apply terraform-destroy terraform-validate terraform-fmt terraform-import-discover terraform-import-discover-staging terraform-import-discover-prod terraform-import terraform-import-staging terraform-import-prod terraform-sync frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp db-reset db-reset-local orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check voice-deps voice-build voice-run voice-test voice-test-cov voice-fmt voice-vet voice-lint voice-check voice-clean voice-health proto-compile proto-compile-go proto-clean-go generate-api-key generate-api-key-long generate-api-key-env generate-api-key-docker
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -141,10 +132,102 @@ frontend-build: ## Build frontend for production
 frontend-start: ## Start frontend production server
 	cd apps/web-frontend && npm run start
 
-# Testing
-test: ## Run tests (placeholder)
-	@echo "Running tests..."
-	# Add test commands here
+# Testing - Individual App Tests
+api-core-test: ## Run api-core unit tests
+	@echo "Running API Core tests..."
+	@if command -v poetry >/dev/null 2>&1; then \
+		echo "Using Poetry..."; \
+		(cd apps/api-core && poetry install --no-interaction --no-root >/dev/null 2>&1 || true && \
+		 poetry install --no-interaction >/dev/null 2>&1 || true && \
+		 PYTHONPATH=src:../../libs/py-common/src poetry run pytest tests/ -v --cov=api_core --cov-report=term-missing); \
+	elif [ -d "apps/api-core/.venv" ]; then \
+		echo "Using virtual environment..."; \
+		(cd apps/api-core && .venv/bin/pip install -q -r requirements-dev.txt >/dev/null 2>&1 || true && \
+		 PYTHONPATH=src:../../libs/py-common/src .venv/bin/pytest tests/ -v --cov=api_core --cov-report=term-missing); \
+	else \
+		echo "⚠️  Poetry not found and no venv. Installing dependencies with pip..."; \
+		(cd apps/api-core && pip install -q -r requirements-dev.txt >/dev/null 2>&1 || true && \
+		 PYTHONPATH=src:../../libs/py-common/src pytest tests/ -v --cov=api_core --cov-report=term-missing); \
+	fi
+
+api-core-test-cov: ## Run api-core tests with coverage report
+	@echo "Running API Core tests with coverage..."
+	@if command -v poetry >/dev/null 2>&1; then \
+		echo "Using Poetry..."; \
+		(cd apps/api-core && poetry install --no-interaction --no-root >/dev/null 2>&1 || true && \
+		 poetry install --no-interaction >/dev/null 2>&1 || true && \
+		 PYTHONPATH=src:../../libs/py-common/src poetry run pytest tests/ -v --cov=api_core --cov-report=html --cov-report=term-missing); \
+	elif [ -d "apps/api-core/.venv" ]; then \
+		echo "Using virtual environment..."; \
+		(cd apps/api-core && .venv/bin/pip install -q -r requirements-dev.txt >/dev/null 2>&1 || true && \
+		 PYTHONPATH=src:../../libs/py-common/src .venv/bin/pytest tests/ -v --cov=api_core --cov-report=html --cov-report=term-missing); \
+	else \
+		echo "⚠️  Poetry not found and no venv. Installing dependencies with pip..."; \
+		(cd apps/api-core && pip install -q -r requirements-dev.txt >/dev/null 2>&1 || true && \
+		 PYTHONPATH=src:../../libs/py-common/src pytest tests/ -v --cov=api_core --cov-report=html --cov-report=term-missing); \
+	fi
+	@echo "Coverage report: apps/api-core/htmlcov/index.html"
+
+cognitive-orch-test: ## Run cognitive-orch unit tests
+	@echo "Running Cognitive Orchestrator tests..."
+	@if [ ! -f "$(ORCH_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make orch-venv-setup && make orch-venv-install' first"; \
+		exit 1; \
+	fi
+	@(cd apps/cognitive-orch && PYTHONPATH=src:../../libs/py-common/src .venv/bin/pytest tests/ -v --cov=cognitive_orch --cov-report=term-missing)
+
+document-ingestion-test: ## Run document-ingestion unit tests
+	@echo "Running Document Ingestion tests..."
+	@if [ ! -f "$(INGESTION_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make ingestion-venv-setup && make ingestion-venv-install' first"; \
+		exit 1; \
+	fi
+	@(cd apps/document-ingestion && PYTHONPATH=src:../../libs/py-common/src .venv/bin/pytest tests/ -v --cov=document_ingestion --cov-report=term-missing)
+
+integration-worker-test: ## Run integration-worker unit tests
+	@echo "Running Integration Worker tests..."
+	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
+		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
+		exit 1; \
+	fi
+	@(cd apps/integration-worker && PYTHONPATH=src:../api-core/src:../../libs/py-common/src .venv/bin/pytest tests/ -v --cov=integration_worker --cov-report=term-missing)
+
+voice-gateway-test: ## Run voice-gateway unit tests
+	@echo "Running Voice Gateway tests..."
+	@(cd apps/voice-gateway && go test ./... -v -race)
+
+voice-gateway-test-cov: ## Run voice-gateway tests with coverage
+	@echo "Running Voice Gateway tests with coverage..."
+	@(cd apps/voice-gateway && go test ./... -v -race -coverprofile=coverage.out -covermode=atomic && \
+	  go tool cover -html=coverage.out -o coverage.html)
+	@echo "Coverage report generated: apps/voice-gateway/coverage.html"
+
+# Testing - Run All Tests
+test-all: ## Run all unit tests for all applications
+	@echo "========================================="
+	@echo "Running all unit tests..."
+	@echo "========================================="
+	@echo ""
+	@echo "1. Testing API Core..."
+	@$(MAKE) api-core-test || (echo "❌ API Core tests failed" && exit 1)
+	@echo ""
+	@echo "2. Testing Cognitive Orchestrator..."
+	@$(MAKE) cognitive-orch-test || (echo "❌ Cognitive Orchestrator tests failed" && exit 1)
+	@echo ""
+	@echo "3. Testing Document Ingestion..."
+	@$(MAKE) document-ingestion-test || (echo "❌ Document Ingestion tests failed" && exit 1)
+	@echo ""
+	@echo "4. Testing Integration Worker..."
+	@$(MAKE) integration-worker-test || (echo "❌ Integration Worker tests failed" && exit 1)
+	@echo ""
+	@echo "5. Testing Voice Gateway..."
+	@$(MAKE) voice-gateway-test || (echo "❌ Voice Gateway tests failed" && exit 1)
+	@echo ""
+	@echo "========================================="
+	@echo "✅ All tests passed!"
+	@echo "========================================="
+
+test: test-all ## Alias for test-all
 
 # Code quality
 format: ## Format code
@@ -157,24 +240,239 @@ lint: ## Lint code
 	# Add other lint commands here
 
 # Terraform commands
-# Source .env.local to load TF_VAR_* environment variables
+# All commands source .env for TF_VAR_* environment variables and use dev.tfvars
 terraform-init: ## Initialize Terraform
-	@bash -c 'if [ -f .env.local ]; then set -a; source .env.local; set +a; fi; cd infra/terraform && terraform init'
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && terraform init'
 
 terraform-plan: ## Run Terraform plan (dev environment)
-	@bash -c 'if [ -f .env.local ]; then set -a; source .env.local; set +a; fi; cd infra/terraform && terraform plan -var-file=dev.tfvars'
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && terraform plan -var-file=dev.tfvars'
 
 terraform-apply: ## Apply Terraform changes (dev environment)
-	@bash -c 'if [ -f .env.local ]; then set -a; source .env.local; set +a; fi; cd infra/terraform && terraform apply -var-file=dev.tfvars'
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && terraform apply -var-file=dev.tfvars'
 
 terraform-destroy: ## Destroy Terraform resources (dev environment)
-	@bash -c 'if [ -f .env.local ]; then set -a; source .env.local; set +a; fi; cd infra/terraform && terraform destroy -var-file=dev.tfvars'
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && terraform destroy -var-file=dev.tfvars'
 
-terraform-validate: ## Validate Terraform configuration
-	cd infra/terraform && terraform validate
+terraform-validate: ## Validate Terraform configuration syntax and structure
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && terraform init -backend=false && terraform validate'
+
+terraform-import-github-oidc: ## Import existing GitHub OIDC application into Terraform state
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/import-github-oidc.sh'
 
 terraform-fmt: ## Format Terraform files
-	cd infra/terraform && terraform fmt -recursive
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && terraform fmt -recursive'
+
+terraform-refresh: ## Refresh Terraform state to match what actually exists in Azure (requires active subscription)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && terraform refresh -var-file=dev.tfvars'
+
+terraform-check-subscription: ## Check Azure subscription status and service accessibility (useful for troubleshooting)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/check-subscription-status.sh'
+
+terraform-register-providers: ## Register required Azure resource providers (Container Apps, etc.)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/register-container-apps-provider.sh'
+
+terraform-import-cae: ## Import existing Container Apps Environment into Terraform state
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/import-container-apps-env.sh'
+
+terraform-import-container-apps: ## Import existing Container Apps into Terraform state
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/import-container-apps.sh'
+
+terraform-check-app-status: ## Check status of integration-worker-beat Container App (for diagnosing 412 errors)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/check-container-app-status.sh'
+
+terraform-delete-failed-app: ## Delete a failed Container App (usage: make terraform-delete-failed-app APP=api-core)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/delete-failed-container-app.sh $(APP)'
+
+terraform-import-discover: ## Discover existing Azure resources and generate import commands (dev environment)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/import-resources.sh dev'
+
+terraform-import-discover-staging: ## Discover existing Azure resources and generate import commands (staging environment)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/import-resources.sh staging'
+
+terraform-import-discover-prod: ## Discover existing Azure resources and generate import commands (prod environment)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/import-resources.sh prod'
+
+terraform-import: ## Run generated import commands (dev environment)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && if [ -f import-commands-dev.sh ]; then bash import-commands-dev.sh; else echo "Error: import-commands-dev.sh not found. Run 'make terraform-import-discover' first."; exit 1; fi'
+
+terraform-import-staging: ## Run generated import commands (staging environment)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && if [ -f import-commands-staging.sh ]; then bash import-commands-staging.sh; else echo "Error: import-commands-staging.sh not found. Run 'make terraform-import-discover-staging' first."; exit 1; fi'
+
+terraform-import-prod: ## Run generated import commands (prod environment)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && if [ -f import-commands-prod.sh ]; then bash import-commands-prod.sh; else echo "Error: import-commands-prod.sh not found. Run 'make terraform-import-discover-prod' first."; exit 1; fi'
+
+terraform-sync: ## Sync existing Azure resources with Terraform state (discover + import) (dev environment)
+	@echo "Step 1: Discovering existing resources..."
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/import-resources.sh dev'
+	@echo ""
+	@echo "Step 2: Review the generated import commands in infra/terraform/import-commands-dev.sh"
+	@echo "Step 3: Run 'make terraform-import' to execute the imports"
+
+terraform-state-cleanup: ## Remove old resources (OpenAI, Redis Cache) from Terraform state (works even if subscription is disabled)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/remove-old-resources.sh'
+
+terraform-destroy-no-refresh: ## Destroy Terraform resources without refreshing state (useful when subscription is disabled)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && terraform destroy -refresh=false -var-file=dev.tfvars'
+
+# Shared Resources Commands
+# These commands target the shared resources in infra/terraform/shared/
+terraform-shared-init: ## Initialize Terraform for shared resources
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform/shared && terraform init'
+
+terraform-shared-plan: ## Run Terraform plan for shared resources
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform/shared && terraform plan -var-file=shared.tfvars'
+
+terraform-shared-apply: ## Apply Terraform changes for shared resources
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform/shared && terraform apply -var-file=shared.tfvars'
+
+terraform-shared-destroy: ## Destroy shared resources (use with caution!)
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform/shared && terraform destroy -var-file=shared.tfvars'
+
+terraform-shared-validate: ## Validate Terraform configuration for shared resources
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform/shared && terraform init -backend=false && terraform validate'
+
+terraform-shared-output: ## Show outputs from shared resources
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform/shared && terraform output'
+
+terraform-shared-fmt: ## Format Terraform files for shared resources
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform/shared && terraform fmt -recursive'
+
+# Phase 4: Migration Scripts
+migrate-acr-images: ## Migrate container images from environment-specific ACR to shared ACR (usage: make migrate-acr-images ENV=dev [SHARED_ACR=lexiqaiacrshared])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make migrate-acr-images ENV=<environment> [SHARED_ACR=<acr-name>]"; \
+		echo "Example: make migrate-acr-images ENV=dev SHARED_ACR=lexiqaiacrshared"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/migrate-acr-images.sh
+	@infra/terraform/scripts/migrate-acr-images.sh $(ENV) $(SHARED_ACR)
+
+export-dns-records: ## Export DNS records from environment-specific DNS zone (usage: make export-dns-records ENV=dev [DNS_ZONE=lexiqai.com] [OUTPUT=dns-records-dev.json])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make export-dns-records ENV=<environment> [DNS_ZONE=<zone-name>] [OUTPUT=<output-file>]"; \
+		echo "Example: make export-dns-records ENV=dev DNS_ZONE=lexiqai.com OUTPUT=dns-records-dev.json"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/export-dns-records.sh
+	@infra/terraform/scripts/export-dns-records.sh $(ENV) $(DNS_ZONE) $(OUTPUT)
+
+# Phase 7: Cleanup Scripts
+verify-shared-resources: ## Verify Container Apps are using shared resources before cleanup (usage: make verify-shared-resources ENV=dev [SHARED_ACR=lexiqaiacrshared])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make verify-shared-resources ENV=<environment> [SHARED_ACR=<acr-name>]"; \
+		echo "Example: make verify-shared-resources ENV=dev SHARED_ACR=lexiqaiacrshared"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/verify-shared-resources.sh
+	@infra/terraform/scripts/verify-shared-resources.sh $(ENV) $(SHARED_ACR)
+
+cleanup-old-acr: ## Remove old environment-specific ACR from Terraform state (usage: make cleanup-old-acr ENV=dev [DELETE_FROM_AZURE=true])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make cleanup-old-acr ENV=<environment> [DELETE_FROM_AZURE=true]"; \
+		echo "Example: make cleanup-old-acr ENV=dev"; \
+		echo "Example: make cleanup-old-acr ENV=dev DELETE_FROM_AZURE=true"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/cleanup-old-acr.sh
+	@if [ "$(DELETE_FROM_AZURE)" == "true" ]; then \
+		infra/terraform/scripts/cleanup-old-acr.sh $(ENV) --delete-from-azure; \
+	else \
+		infra/terraform/scripts/cleanup-old-acr.sh $(ENV); \
+	fi
+
+cleanup-old-github-oidc: ## Remove old environment-specific GitHub OIDC app from Terraform state (usage: make cleanup-old-github-oidc ENV=dev [DELETE_FROM_AZURE=true])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make cleanup-old-github-oidc ENV=<environment> [DELETE_FROM_AZURE=true]"; \
+		echo "Example: make cleanup-old-github-oidc ENV=dev"; \
+		echo "Example: make cleanup-old-github-oidc ENV=dev DELETE_FROM_AZURE=true"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/cleanup-old-github-oidc.sh
+	@if [ "$(DELETE_FROM_AZURE)" == "true" ]; then \
+		infra/terraform/scripts/cleanup-old-github-oidc.sh $(ENV) --delete-from-azure; \
+	else \
+		infra/terraform/scripts/cleanup-old-github-oidc.sh $(ENV); \
+	fi
+
+cleanup-old-dns-zone: ## Remove old environment-specific DNS zone from Terraform state (usage: make cleanup-old-dns-zone ENV=dev [DNS_ZONE=lexiqai.com] [DELETE_FROM_AZURE=true])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make cleanup-old-dns-zone ENV=<environment> [DNS_ZONE=<zone-name>] [DELETE_FROM_AZURE=true]"; \
+		echo "Example: make cleanup-old-dns-zone ENV=dev DNS_ZONE=lexiqai.com"; \
+		echo "Example: make cleanup-old-dns-zone ENV=dev DNS_ZONE=lexiqai.com DELETE_FROM_AZURE=true"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/cleanup-old-dns-zone.sh
+	@if [ "$(DELETE_FROM_AZURE)" == "true" ]; then \
+		infra/terraform/scripts/cleanup-old-dns-zone.sh $(ENV) $(DNS_ZONE) --delete-from-azure; \
+	else \
+		infra/terraform/scripts/cleanup-old-dns-zone.sh $(ENV) $(DNS_ZONE); \
+	fi
+
+update-container-apps-shared-acr: ## Update Container Apps to use shared ACR images (usage: make update-container-apps-shared-acr ENV=dev [SHARED_ACR=lexiqaiacrshared])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make update-container-apps-shared-acr ENV=<environment> [SHARED_ACR=<acr-name>]"; \
+		echo "Example: make update-container-apps-shared-acr ENV=dev SHARED_ACR=lexiqaiacrshared"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/update-container-apps-to-shared-acr.sh
+	@infra/terraform/scripts/update-container-apps-to-shared-acr.sh $(ENV) $(SHARED_ACR)
+
+import-public-images-acr: ## Import public Docker images (Redis, RabbitMQ, Qdrant) into shared ACR (usage: make import-public-images-acr ENV=dev [SHARED_ACR=lexiqaiacrshared])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make import-public-images-acr ENV=<environment> [SHARED_ACR=<acr-name>]"; \
+		echo "Example: make import-public-images-acr ENV=dev SHARED_ACR=lexiqaiacrshared"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/import-public-images-to-acr.sh
+	@infra/terraform/scripts/import-public-images-to-acr.sh $(ENV) $(SHARED_ACR)
+
+update-container-apps-shared-acr: ## Update Container Apps to use shared ACR images (usage: make update-container-apps-shared-acr ENV=dev [SHARED_ACR=lexiqaiacrshared])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make update-container-apps-shared-acr ENV=<environment> [SHARED_ACR=<acr-name>]"; \
+		echo "Example: make update-container-apps-shared-acr ENV=dev SHARED_ACR=lexiqaiacrshared"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/update-container-apps-to-shared-acr.sh
+	@infra/terraform/scripts/update-container-apps-to-shared-acr.sh $(ENV) $(SHARED_ACR)
+
+import-public-images-acr: ## Import public Docker images (Redis, RabbitMQ, Qdrant) into shared ACR (usage: make import-public-images-acr ENV=dev [SHARED_ACR=lexiqaiacrshared])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make import-public-images-acr ENV=<environment> [SHARED_ACR=<acr-name>]"; \
+		echo "Example: make import-public-images-acr ENV=dev SHARED_ACR=lexiqaiacrshared"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/import-public-images-to-acr.sh
+	@infra/terraform/scripts/import-public-images-to-acr.sh $(ENV) $(SHARED_ACR)
+
+build-push-infrastructure-images: ## Build and push infrastructure images (Redis, RabbitMQ, Qdrant) to shared ACR (usage: make build-push-infrastructure-images ENV=dev [SHARED_ACR=lexiqaiacrshared])
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make build-push-infrastructure-images ENV=<environment> [SHARED_ACR=<acr-name>]"; \
+		echo "Example: make build-push-infrastructure-images ENV=dev SHARED_ACR=lexiqaiacrshared"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/build-and-push-infrastructure-images.sh
+	@infra/terraform/scripts/build-and-push-infrastructure-images.sh $(ENV) $(SHARED_ACR)
+
+setup-static-web-app: ## Configure Static Web App app settings and get deployment token (usage: make setup-static-web-app ENV=dev)
+	@if [ -z "$(ENV)" ]; then \
+		echo "Error: ENV is required"; \
+		echo "Usage: make setup-static-web-app ENV=<environment>"; \
+		echo "Example: make setup-static-web-app ENV=dev"; \
+		exit 1; \
+	fi
+	@chmod +x infra/terraform/scripts/setup-static-web-app.sh
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform && bash scripts/setup-static-web-app.sh $(ENV)'
 
 # Database Migrations (Alembic)
 # All migration commands run from apps/api-core directory
@@ -196,11 +494,29 @@ else
 endif
 
 api-venv-setup: ## Set up Python virtual environment for api-core
-	@echo "Setting up Python virtual environment..."
-	cd apps/api-core && python3 -m venv .venv
+	@echo "Setting up Python virtual environment for API Core..."
+	@echo "Checking for Python 3.11+ (required for api-core)..."
+	@PYTHON_CMD=$$(command -v python3.12 || command -v python3.11 || command -v python3 || echo ""); \
+	if [ -z "$$PYTHON_CMD" ]; then \
+		echo "❌ Error: Python 3.11+ is required but not found."; \
+		echo "Please install Python 3.11 or 3.12 and ensure it's in your PATH."; \
+		echo "You can check available Python versions with: python3 --version"; \
+		exit 1; \
+	fi; \
+	PYTHON_VERSION=$$($$PYTHON_CMD --version 2>&1 | awk '{print $$2}' | cut -d. -f1,2); \
+	PYTHON_MAJOR=$$(echo $$PYTHON_VERSION | cut -d. -f1); \
+	PYTHON_MINOR=$$(echo $$PYTHON_VERSION | cut -d. -f2); \
+	if [ $$PYTHON_MAJOR -lt 3 ] || ([ $$PYTHON_MAJOR -eq 3 ] && [ $$PYTHON_MINOR -lt 11 ]); then \
+		echo "❌ Error: Python 3.11+ is required, but found Python $$PYTHON_VERSION"; \
+		echo "Please install Python 3.11 or 3.12 and ensure it's in your PATH."; \
+		echo "You can check available Python versions with: python3.11 --version or python3.12 --version"; \
+		exit 1; \
+	fi; \
+	echo "✓ Found Python $$PYTHON_VERSION at $$PYTHON_CMD"; \
+	cd apps/api-core && $$PYTHON_CMD -m venv .venv
 	@echo "✓ Virtual environment created at apps/api-core/.venv"
 	@echo "Activate it with: source apps/api-core/.venv/bin/activate"
-	@echo "Or install dependencies with: make venv-install"
+	@echo "Or install dependencies with: make api-venv-install"
 
 api-venv-install: ## Install dependencies in virtual environment
 	@if [ ! -f "$(VENV_ACTIVATE)" ]; then \
@@ -428,13 +744,7 @@ orch-dev: ## Run cognitive-orch development server
 	@echo "API docs will be available at http://localhost:8001/docs"
 	cd apps/cognitive-orch && PYTHONPATH=src .venv/bin/uvicorn cognitive_orch.main:app --reload --host 0.0.0.0 --port 8001
 
-orch-test: ## Run cognitive-orch tests
-	@if [ ! -f "$(ORCH_VENV_ACTIVATE)" ]; then \
-		echo "⚠️  Virtual environment not found. Run 'make orch-venv-setup && make orch-venv-install' first"; \
-		exit 1; \
-	fi
-	@echo "Running Cognitive Orchestrator tests..."
-	cd apps/cognitive-orch && PYTHONPATH=src .venv/bin/pytest tests/ -v
+orch-test: cognitive-orch-test ## Alias for cognitive-orch-test
 
 orch-test-cov: ## Run cognitive-orch tests with coverage
 	@if [ ! -f "$(ORCH_VENV_ACTIVATE)" ]; then \
@@ -517,6 +827,7 @@ ingestion-venv-install: ## Install dependencies in document-ingestion virtual en
 	fi
 	@echo "Installing dependencies for Document Ingestion Service..."
 	cd apps/document-ingestion && .venv/bin/python -m pip install --upgrade pip
+	cd apps/document-ingestion && .venv/bin/python -m pip install -r requirements.txt
 	cd apps/document-ingestion && .venv/bin/python -m pip install -r requirements-dev.txt
 	@echo "✓ Dependencies installed"
 
@@ -531,13 +842,7 @@ ingestion-dev: ## Run document-ingestion development server
 	@echo "API docs will be available at http://localhost:8003/docs"
 	cd apps/document-ingestion && PYTHONPATH=src .venv/bin/uvicorn document_ingestion.main:app --reload --host 0.0.0.0 --port 8003
 
-ingestion-test: ## Run document-ingestion tests
-	@if [ ! -f "$(INGESTION_VENV_ACTIVATE)" ]; then \
-		echo "⚠️  Virtual environment not found. Run 'make ingestion-venv-setup && make ingestion-venv-install' first"; \
-		exit 1; \
-	fi
-	@echo "Running Document Ingestion Service tests..."
-	cd apps/document-ingestion && PYTHONPATH=src .venv/bin/pytest tests/ -v
+ingestion-test: document-ingestion-test ## Alias for document-ingestion-test
 
 ingestion-test-cov: ## Run document-ingestion tests with coverage
 	@if [ ! -f "$(INGESTION_VENV_ACTIVATE)" ]; then \
@@ -606,7 +911,36 @@ endif
 
 worker-venv-setup: ## Set up Python virtual environment for integration-worker
 	@echo "Setting up Python virtual environment for Integration Worker..."
-	cd apps/integration-worker && python3 -m venv .venv
+	@echo "Checking for Python 3.11+ (required for api-core and integration-worker)..."
+	@PYTHON_CMD=$$(command -v python3.12 || command -v python3.11 || command -v python3 || echo ""); \
+	if [ -z "$$PYTHON_CMD" ]; then \
+		echo "❌ Error: Python 3.11+ is required but not found."; \
+		echo "Please install Python 3.11 or 3.12 and ensure it's in your PATH."; \
+		echo "You can check available Python versions with: python3 --version"; \
+		exit 1; \
+	fi; \
+	PYTHON_VERSION=$$($$PYTHON_CMD --version 2>&1 | awk '{print $$2}' | cut -d. -f1,2); \
+	PYTHON_MAJOR=$$(echo $$PYTHON_VERSION | cut -d. -f1); \
+	PYTHON_MINOR=$$(echo $$PYTHON_VERSION | cut -d. -f2); \
+	if [ $$PYTHON_MAJOR -lt 3 ] || ([ $$PYTHON_MAJOR -eq 3 ] && [ $$PYTHON_MINOR -lt 11 ]); then \
+		echo "❌ Error: Python 3.11+ is required, but found Python $$PYTHON_VERSION"; \
+		echo "Please install Python 3.11 or 3.12 and ensure it's in your PATH."; \
+		echo "You can check available Python versions with: python3.11 --version or python3.12 --version"; \
+		exit 1; \
+	fi; \
+	echo "✓ Found Python $$PYTHON_VERSION at $$PYTHON_CMD"; \
+	if [ -d "apps/integration-worker/.venv" ]; then \
+		EXISTING_PYTHON_VERSION=$$(apps/integration-worker/.venv/bin/python --version 2>&1 | awk '{print $$2}' | cut -d. -f1,2 2>/dev/null || echo ""); \
+		if [ -n "$$EXISTING_PYTHON_VERSION" ]; then \
+			EXISTING_MAJOR=$$(echo $$EXISTING_PYTHON_VERSION | cut -d. -f1); \
+			EXISTING_MINOR=$$(echo $$EXISTING_PYTHON_VERSION | cut -d. -f2); \
+			if [ $$EXISTING_MAJOR -lt 3 ] || ([ $$EXISTING_MAJOR -eq 3 ] && [ $$EXISTING_MINOR -lt 11 ]); then \
+				echo "⚠️  Existing venv uses Python $$EXISTING_PYTHON_VERSION (< 3.11). Removing it..."; \
+				rm -rf apps/integration-worker/.venv; \
+			fi; \
+		fi; \
+	fi; \
+	cd apps/integration-worker && $$PYTHON_CMD -m venv .venv
 	@echo "✓ Virtual environment created at apps/integration-worker/.venv"
 	@echo "Activate it with: source apps/integration-worker/.venv/bin/activate"
 	@echo "Or install dependencies with: make worker-venv-install"
@@ -658,13 +992,7 @@ worker-purge: ## Purge all pending tasks from Celery queue
 		cd apps/integration-worker && PYTHONPATH=src:../api-core/src $(WORKER_CELERY_CMD) -A integration_worker.celery_app purge -f; \
 	fi
 
-worker-test: ## Run integration-worker tests
-	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
-		echo "⚠️  Virtual environment not found. Run 'make worker-venv-setup && make worker-venv-install' first"; \
-		exit 1; \
-	fi
-	@echo "Running Integration Worker tests..."
-	cd apps/integration-worker && PYTHONPATH=src:../api-core/src $(WORKER_PYTEST_CMD) tests/ -v
+worker-test: integration-worker-test ## Alias for integration-worker-test
 
 worker-test-cov: ## Run integration-worker tests with coverage
 	@if [ ! -f "$(WORKER_VENV_ACTIVATE)" ]; then \
@@ -754,9 +1082,7 @@ voice-run: ## Run voice-gateway development server
 	@echo "Health check: http://localhost:8080/health"
 	cd apps/voice-gateway && go run ./cmd/server
 
-voice-test: ## Run voice-gateway tests
-	@echo "Running Voice Gateway tests..."
-	cd apps/voice-gateway && go test ./... -v
+voice-test: voice-gateway-test ## Alias for voice-gateway-test
 
 voice-test-cov: ## Run voice-gateway tests with coverage
 	@echo "Running Voice Gateway tests with coverage..."

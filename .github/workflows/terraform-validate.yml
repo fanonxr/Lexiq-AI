@@ -1,5 +1,8 @@
 name: Terraform Validate
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
@@ -7,14 +10,19 @@ on:
       - '.github/workflows/terraform-validate.yml'
   push:
     branches:
-      - main
+      - master
       - develop
+      - prod
+      - feature-*
+      - fix-*
     paths:
       - 'infra/terraform/**'
+      - '.github/workflows/terraform-validate.yml'
+  workflow_dispatch:
 
 jobs:
-  validate:
-    name: Validate Terraform
+  validate-shared:
+    name: Validate Shared Resources
     runs-on: ubuntu-latest
     
     steps:
@@ -26,17 +34,45 @@ jobs:
         with:
           terraform_version: 1.5.0
 
-      - name: Terraform Format Check
+      - name: Terraform Format Check (Shared)
+        run: |
+          cd infra/terraform/shared
+          terraform fmt -check -recursive || (echo "Format check failed. Run 'terraform fmt -recursive' to fix." && exit 1)
+
+      - name: Terraform Init (Shared)
+        run: |
+          cd infra/terraform/shared
+          terraform init -backend=false
+
+      - name: Terraform Validate (Shared)
+        run: |
+          cd infra/terraform/shared
+          terraform validate
+
+  validate-environment:
+    name: Validate Environment Resources
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Format Check (Environment)
         run: |
           cd infra/terraform
-          terraform fmt -check -recursive
+          terraform fmt -check -recursive || (echo "Format check failed. Run 'terraform fmt -recursive' to fix." && exit 1)
 
-      - name: Terraform Init
+      - name: Terraform Init (Environment)
         run: |
           cd infra/terraform
           terraform init -backend=false
 
-      - name: Terraform Validate
+      - name: Terraform Validate (Environment)
         run: |
           cd infra/terraform
           terraform validate

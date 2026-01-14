@@ -138,45 +138,50 @@ variable "redis_version" {
   default     = "7.0"
 }
 
-# Azure OpenAI Variables
-variable "openai_sku_name" {
-  description = "Azure OpenAI SKU name (S0 for dev, S1+ for prod)"
+# Container Registry Variables
+variable "container_image_tag" {
+  description = "Container image tag/version for all services (e.g., 'v1.0.0', 'latest', 'main-abc123'). Should be updated for each build."
   type        = string
-  default     = "S0"
+  default     = "latest"
 }
 
-variable "openai_public_network_access_enabled" {
-  description = "Whether to enable public network access for Azure OpenAI"
-  type        = bool
-  default     = true
+# DNS & Custom Domain Variables (optional)
+variable "api_core_custom_domain" {
+  description = "Custom domain for API Core (e.g., 'api.example.com'). Leave empty to use default Container Apps FQDN."
+  type        = string
+  default     = ""
 }
 
-variable "openai_model_deployments" {
-  description = "Map of Azure OpenAI model deployments. Key is deployment name, value contains model config."
-  type = map(object({
-    model_name    = string
-    model_version = string
-    scale_type    = string
-    scale_capacity = number
-    scale_tier    = optional(string) # One of: "Free", "Basic", "Standard", "Premium", "Enterprise"
-    scale_size    = optional(string)
-  }))
-  default = {
-    "gpt-4o" = {
-      model_name    = "gpt-4o"
-      model_version = "2024-08-06"  # Specific version required (2024-08-06 is the default)
-      scale_type    = "Standard"
-      scale_capacity = 1  # Start with 1 (minimum) - increase after quota approval
-      scale_tier    = "Standard"  # Valid values: "Free", "Basic", "Standard", "Premium", "Enterprise"
-      scale_size    = null
-    }
-  }
+variable "voice_gateway_custom_domain" {
+  description = "Custom domain for Voice Gateway (e.g., 'voice.example.com'). Leave empty to use default Container Apps FQDN."
+  type        = string
+  default     = ""
 }
 
-variable "openai_key_vault_enabled" {
-  description = "Whether to store OpenAI secrets in Key Vault (requires Key Vault to exist)"
-  type        = bool
-  default     = true
+variable "integration_webhooks_custom_domain" {
+  description = "Custom domain for Integration Worker Webhooks (e.g., 'webhooks.example.com'). Leave empty to use default Container Apps FQDN."
+  type        = string
+  default     = ""
+}
+
+# Optional: Azure DNS Zone (if managing DNS through Azure)
+variable "dns_zone_name" {
+  description = "Azure DNS zone name (e.g., 'lexiqai.com'). Leave empty if using external DNS provider."
+  type        = string
+  default     = ""
+}
+
+# Static Web Apps Variables
+variable "static_web_app_custom_domain" {
+  description = "Custom domain for Static Web App (e.g., 'www.lexiqai.com' or 'app.lexiqai.com'). Leave empty to use default Static Web Apps domain."
+  type        = string
+  default     = ""
+}
+
+variable "static_web_app_location" {
+  description = "Azure region for Static Web Apps (must be a supported Static Web Apps region, e.g., 'East US 2')"
+  type        = string
+  default     = "EastUS2" # Static Web Apps specific location
 }
 
 # Storage Account Variables
@@ -217,7 +222,7 @@ variable "container_apps_environment_name" {
   default     = ""
 }
 
-# Entra ID Variables (for future use)
+# Entra ID Variables (for Static Web App and application configuration)
 variable "entra_tenant_domain" {
   description = "Entra ID tenant domain (e.g., lexiqai.onmicrosoft.com)"
   type        = string
@@ -225,9 +230,27 @@ variable "entra_tenant_domain" {
 }
 
 variable "entra_app_client_id" {
-  description = "Entra ID application client ID"
+  description = "Entra ID application client ID (for frontend authentication)"
   type        = string
   default     = ""
-  sensitive   = true
+  sensitive   = false # Client ID is safe to be public in OAuth flows
 }
 
+variable "entra_authority" {
+  description = "Entra ID authority URL (default: https://login.microsoftonline.com/common, or use tenant-specific URL)"
+  type        = string
+  default     = "https://login.microsoftonline.com/common"
+}
+
+# GitHub OIDC Variables (for CI/CD)
+variable "github_repository" {
+  description = "GitHub repository in format: owner/repo (e.g., 'your-org/lexiq-ai'). Leave empty to disable GitHub OIDC setup."
+  type        = string
+  default     = ""
+}
+
+variable "github_branch" {
+  description = "GitHub branch to allow OIDC authentication for (e.g., 'main', 'develop', 'master'). Used for GitHub Actions OIDC federation."
+  type        = string
+  default     = "main"
+}
