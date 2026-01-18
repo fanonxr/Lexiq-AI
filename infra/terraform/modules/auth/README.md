@@ -1,47 +1,60 @@
-# Auth Module (Placeholder)
+# Azure AD App Registration Module
 
-Terraform module for Microsoft Entra External ID / Azure AD B2C configuration.
+Terraform module for managing Microsoft Entra ID (Azure AD) App Registration with all required configurations.
 
-## Status
+## Features
 
-🚧 **Placeholder** - Entra ID B2C configuration is primarily done manually in Azure Portal.
+This module automates the creation and configuration of Azure AD App Registrations, including:
 
-## Why Manual Setup?
+- ✅ **App Registration Creation** - Creates the main application registration
+- ✅ **Redirect URIs** - Configures web, SPA, and public client redirect URIs
+- ✅ **API Permissions** - Sets up Microsoft Graph and other API permissions
+- ✅ **Exposed API** - Configures API scopes for frontend-to-backend authentication
+- ✅ **Client Secrets** - Creates and stores client secrets in Key Vault
+- ✅ **Service Principal** - Automatically creates the service principal
+- ✅ **App Roles** - Supports role-based access control (RBAC)
 
-Microsoft Entra External ID (Azure AD B2C) configuration is complex and often requires:
-- Manual tenant creation
-- User flow configuration via Azure Portal UI
-- Identity provider setup (Microsoft, Google, etc.)
-- Custom branding and policies
+## Usage
 
-While some aspects can be automated with Terraform (App Registrations), the full setup is typically done manually for better control and visibility.
+See the main Terraform configuration in `../../main.tf` for usage examples.
 
-## What Can Be Automated?
+## Required Permissions
 
-Future enhancements may include:
-- App Registration creation
-- API permissions configuration
-- Redirect URI management
-- Certificate/key management
+To use this module, you need:
 
-## Current Approach
+1. **Azure AD Permissions**:
+   - `Application Administrator` or `Global Administrator` role
+   - Or `Application.ReadWrite.All` API permission
 
-1. **Manual Setup**: Follow [Entra ID Setup Guide](/docs/foundation/entra-id-setup.md)
-2. **Store Credentials**: Use Azure Key Vault or environment variables
-3. **Reference in Code**: Use stored Client ID and Tenant ID
+2. **Key Vault Permissions** (if storing secrets):
+   - `Key Vault Secrets Officer` or `Key Vault Contributor` role
 
-## Configuration Values Needed
+## Admin Consent
 
-After manual setup, you'll need:
-- **Tenant ID**: Directory (tenant) ID
-- **Client ID**: Application (client) ID
-- **Authority URL**: For External ID, the B2C authority URL
+**Important**: Admin consent for API permissions must be granted manually:
 
-Store these in:
-- Local: `.env.local` file
-- Azure: Key Vault or Container App environment variables
+1. Go to Azure Portal → Azure Active Directory → App registrations
+2. Select your app → API permissions
+3. Click "Grant admin consent for [Your Organization]"
 
-## Documentation
+Or via Azure CLI:
+```bash
+az ad app permission admin-consent --id <application-id>
+```
 
-See [Entra ID Setup Guide](/docs/foundation/entra-id-setup.md) for complete setup instructions.
+## Outputs
 
+The module provides the following outputs:
+
+- `application_id` - Application (Client) ID
+- `application_object_id` - Application Object ID
+- `service_principal_id` - Service Principal ID
+- `authority_url` - Authority URL for authentication
+- `tenant_id` - Azure AD Tenant ID
+- `application_id_uri` - Application ID URI (for exposed API)
+- `client_secret_value` - Client secret value (sensitive, stored in Key Vault)
+
+## Related Documentation
+
+- [Azure AD App Registration Guide](https://learn.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app)
+- [Microsoft Graph Permissions](https://learn.microsoft.com/en-us/graph/permissions-reference)

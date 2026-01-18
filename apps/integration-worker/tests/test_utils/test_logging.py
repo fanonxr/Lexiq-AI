@@ -13,8 +13,15 @@ def test_get_logger():
     assert logger.name == "integration_worker.test"
 
 
-def test_setup_logging():
+def test_setup_logging(monkeypatch):
     """Test that logging is configured correctly."""
+    # Clear log_level env var to use default
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    
+    # Clear singleton to get fresh settings
+    import integration_worker.config
+    integration_worker.config._settings = None
+    
     setup_logging()
     
     logger = logging.getLogger("integration_worker")

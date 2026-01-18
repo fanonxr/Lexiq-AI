@@ -202,7 +202,7 @@ export function useTestCall(): UseMutationResult<
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to initiate test call");
       setError(error);
-      logger.error("Error initiating test call", error, { phoneNumber: data.phoneNumber });
+      logger.error("Error initiating test call", error, { phoneNumber });
       throw error;
     } finally {
       setIsLoading(false);
@@ -254,7 +254,7 @@ export function useImproveScript(): UseMutationResult<
       } catch (err) {
         const error = err instanceof Error ? err : new Error("Failed to improve script");
         setError(error);
-        logger.error("Error improving script", error, { scriptType: data.scriptType });
+        logger.error("Error improving script", error, { scriptType });
         throw error;
       } finally {
         setIsLoading(false);

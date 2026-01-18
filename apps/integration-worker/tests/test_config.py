@@ -6,8 +6,11 @@ from pydantic import ValidationError
 from integration_worker.config import Settings, get_settings
 
 
-def test_settings_defaults():
+def test_settings_defaults(monkeypatch):
     """Test that settings have correct defaults."""
+    # Clear any environment variables that might affect defaults
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    
     # Create settings with minimal required fields
     settings = Settings(
         database_url="postgresql+asyncpg://test:test@localhost/test",
@@ -48,8 +51,14 @@ def test_settings_from_env(monkeypatch):
     assert settings.azure_ad_client_id == "env-client-id"
 
 
-def test_settings_required_fields():
+def test_settings_required_fields(monkeypatch):
     """Test that required fields raise validation error when missing."""
+    # Clear required environment variables to ensure validation fails
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("AZURE_AD_CLIENT_ID", raising=False)
+    monkeypatch.delenv("AZURE_AD_TENANT_ID", raising=False)
+    monkeypatch.delenv("AZURE_AD_CLIENT_SECRET", raising=False)
+    
     with pytest.raises(ValidationError):
         Settings()  # Should fail without required fields
 

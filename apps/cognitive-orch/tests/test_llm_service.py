@@ -46,25 +46,27 @@ class TestModelValidation:
 
     def test_validate_azure_model_with_config(self, llm_service):
         """Test validation passes when Azure OpenAI is configured."""
-        # Mock settings to have Azure OpenAI configured
-        with patch.object(llm_service.settings.llm, "has_azure_openai", True):
-            # Should not raise
-            llm_service._validate_model_configuration("azure/gpt-4o")
+        # Mock settings to have Azure OpenAI configured by setting the underlying attributes
+        llm_service.settings.llm.azure_api_key = "test-key"
+        llm_service.settings.llm.azure_api_base = "https://test.openai.azure.com"
+        # Should not raise
+        llm_service._validate_model_configuration("azure/gpt-4o")
 
     def test_validate_azure_model_without_config(self, llm_service):
         """Test validation fails when Azure OpenAI is not configured."""
         # Mock settings to not have Azure OpenAI configured
-        with patch.object(llm_service.settings.llm, "has_azure_openai", False):
-            with pytest.raises(LLMError) as exc_info:
-                llm_service._validate_model_configuration("azure/gpt-4o")
-            assert "Azure OpenAI" in exc_info.value.message
+        llm_service.settings.llm.azure_api_key = None
+        llm_service.settings.llm.azure_api_base = None
+        with pytest.raises(LLMError) as exc_info:
+            llm_service._validate_model_configuration("azure/gpt-4o")
+        assert "Azure OpenAI" in exc_info.value.message
 
     def test_validate_anthropic_model_without_config(self, llm_service):
         """Test validation fails when Anthropic is not configured."""
-        with patch.object(llm_service.settings.llm, "has_anthropic", False):
-            with pytest.raises(LLMError) as exc_info:
-                llm_service._validate_model_configuration("anthropic/claude-3-haiku")
-            assert "Anthropic" in exc_info.value.message
+        llm_service.settings.llm.anthropic_api_key = None
+        with pytest.raises(LLMError) as exc_info:
+            llm_service._validate_model_configuration("anthropic/claude-3-haiku")
+        assert "Anthropic" in exc_info.value.message
 
 
 class TestLLMCalls:

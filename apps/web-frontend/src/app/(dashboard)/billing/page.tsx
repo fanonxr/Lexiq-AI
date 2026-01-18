@@ -39,9 +39,6 @@ import {
 } from "@/lib/api/billing";
 import { logger } from "@/lib/logger";
 
-// Force dynamic rendering because layout uses client components
-export const dynamic = "force-dynamic";
-
 /**
  * Billing Dashboard Page
  * 

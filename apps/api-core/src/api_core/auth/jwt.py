@@ -2,7 +2,7 @@
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from jose import JWTError, jwt
@@ -123,10 +123,10 @@ class JWTTokenHandler:
     ) -> str:
         """Create an access token for a user."""
         if expires_delta:
-            exp = int((datetime.utcnow() + expires_delta).timestamp())
+            exp = int((datetime.now(timezone.utc) + expires_delta).timestamp())
         else:
             exp = int(
-                (datetime.utcnow() + timedelta(minutes=self.config.access_token_expire_minutes)).timestamp()
+                (datetime.now(timezone.utc) + timedelta(minutes=self.config.access_token_expire_minutes)).timestamp()
             )
 
         payload = TokenPayload(
@@ -149,11 +149,11 @@ class JWTTokenHandler:
         """Create a refresh token for a user."""
         # Refresh tokens typically have longer expiration
         if expires_delta:
-            exp = int((datetime.utcnow() + expires_delta).timestamp())
+            exp = int((datetime.now(timezone.utc) + expires_delta).timestamp())
         else:
             # Use configured refresh token expiration
             exp = int(
-                (datetime.utcnow() + timedelta(days=self.config.refresh_token_expire_days)).timestamp()
+                (datetime.now(timezone.utc) + timedelta(days=self.config.refresh_token_expire_days)).timestamp()
             )
 
         payload = TokenPayload(

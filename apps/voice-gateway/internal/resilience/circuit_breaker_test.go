@@ -165,7 +165,6 @@ func TestCircuitBreaker_GetStats(t *testing.T) {
 	if failureCount != 1 {
 		t.Errorf("Expected 1 failure, got %d", failureCount)
 	}
-	expectedRate := 100.0 / 3.0 // 33.33%
 	if failureRate < 33.0 || failureRate > 34.0 {
 		t.Errorf("Expected failure rate around 33.33%%, got %.2f%%", failureRate)
 	}

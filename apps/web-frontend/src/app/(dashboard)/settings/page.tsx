@@ -13,9 +13,6 @@ import { FirmPhoneNumberSettings } from "@/components/settings/FirmPhoneNumberSe
 import { ThemeToggle } from "@/components/settings/ThemeToggle";
 import { logger } from "@/lib/logger";
 
-// Force dynamic rendering because layout uses client components
-export const dynamic = "force-dynamic";
-
 /**
  * Settings Page
  * 

@@ -141,5 +141,12 @@ class TestInternalAuthDep:
         """Test that InternalAuthDep is a FastAPI dependency."""
         from fastapi import Depends
         
-        assert isinstance(InternalAuthDep, Depends)
+        # InternalAuthDep should be created with Depends()
+        # Verify it was created with Depends by checking the type name
+        assert type(InternalAuthDep).__name__ == "Depends"
+        # Check that it has the dependency property (Depends instances have this)
+        assert hasattr(InternalAuthDep, "dependency")
+        # Verify the dependency is the require_internal_api_key function
+        from api_core.auth.internal_service import require_internal_api_key
+        assert InternalAuthDep.dependency == require_internal_api_key
 

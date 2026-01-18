@@ -33,8 +33,12 @@ class DatabaseSettings(BaseSettings):
     @classmethod
     def validate_url(cls, v: str) -> str:
         """Validate database URL format."""
+        # Allow SQLite URLs for testing
+        if v.startswith(("sqlite://", "sqlite+aiosqlite://")):
+            return v
+        # Require PostgreSQL URLs for production/development
         if not v.startswith(("postgresql://", "postgresql+psycopg2://")):
-            raise ValueError("Database URL must start with postgresql:// or postgresql+psycopg2://")
+            raise ValueError("Database URL must start with postgresql:// or postgresql+psycopg2:// (or sqlite:// for testing)")
         return v
 
 
@@ -422,6 +426,18 @@ class Settings(BaseSettings):
         default=None,
         description="Shared secret API key for internal services (sent as X-Internal-API-Key). Env var: INTERNAL_API_KEY",
     )
+
+    @field_validator("internal_api_key_enabled", mode="before")
+    @classmethod
+    def parse_internal_api_key_enabled(cls, v):
+        """Parse internal_api_key_enabled from string, handling whitespace."""
+        if isinstance(v, str):
+            v = v.strip().lower()
+            if v in ("true", "1", "yes", "on"):
+                return True
+            elif v in ("false", "0", "no", "off", ""):
+                return False
+        return v
 
     # Sub-settings
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)

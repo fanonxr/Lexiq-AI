@@ -29,8 +29,9 @@ variable "postgres_server_id" {
 }
 
 variable "redis_cache_id" {
-  description = "ID of the Redis cache for role assignment"
+  description = "ID of the Redis cache for role assignment (optional - not needed for containerized Redis)"
   type        = string
+  default     = null
 }
 
 variable "common_tags" {

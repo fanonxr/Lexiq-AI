@@ -26,9 +26,6 @@ const VolumeChart = lazy(() =>
 // Import type for use in this file
 import type { VolumeChartDataPoint } from "@/components/dashboard/VolumeChart";
 
-// Force dynamic rendering because layout uses client components
-export const dynamic = "force-dynamic";
-
 /**
  * Dashboard home page (Command Center)
  * 

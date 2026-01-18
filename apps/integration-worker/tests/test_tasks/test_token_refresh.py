@@ -28,10 +28,10 @@ class TestTokenRefreshTasks:
         mock_integration.id = str(uuid.uuid4())
         mock_integration.integration_type = "outlook"
         
-        with patch('integration_worker.tasks.token_refresh.CalendarIntegrationRepository') as mock_repo_class:
+        with patch('integration_worker.database.repositories.CalendarIntegrationRepository') as mock_repo_class:
             mock_repo = MagicMock()
             
-            async def mock_get_expiring():
+            async def mock_get_expiring(threshold):
                 return [mock_integration]
             
             mock_repo.get_with_expiring_tokens = mock_get_expiring
@@ -59,10 +59,10 @@ class TestTokenRefreshTasks:
         mock_session = AsyncMock()
         mock_get_session.return_value.__aenter__.return_value = mock_session
         
-        with patch('integration_worker.tasks.token_refresh.CalendarIntegrationRepository') as mock_repo_class:
+        with patch('integration_worker.database.repositories.CalendarIntegrationRepository') as mock_repo_class:
             mock_repo = MagicMock()
             
-            async def mock_get_expiring():
+            async def mock_get_expiring(threshold):
                 return []
             
             mock_repo.get_with_expiring_tokens = mock_get_expiring

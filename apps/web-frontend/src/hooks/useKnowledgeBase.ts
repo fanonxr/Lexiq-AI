@@ -201,7 +201,7 @@ export function useDeleteFile(): UseMutationResult<boolean, string> {
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to delete file");
       setError(error);
-      logger.error("Error deleting file", error, { fileId: data.fileId });
+      logger.error("Error deleting file", error, { fileId });
       throw error;
     } finally {
       setIsLoading(false);
@@ -242,7 +242,7 @@ export function useReindexFile(): UseMutationResult<FileMetadata, string> {
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to re-index file");
       setError(error);
-      logger.error("Error re-indexing file", error, { fileId: data.fileId });
+      logger.error("Error re-indexing file", error, { fileId });
       throw error;
     } finally {
       setIsLoading(false);

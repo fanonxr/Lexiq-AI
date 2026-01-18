@@ -70,15 +70,33 @@ class TestLoginEndpoint:
 
     def test_login_invalid_email(self, client: TestClient):
         """Test login with invalid email."""
-        response = client.post(
-            "/api/v1/auth/login",
-            json={
-                "email": "nonexistent@example.com",
-                "password": "TestPassword123!",
-            },
+        from unittest.mock import patch, AsyncMock, MagicMock
+        from contextlib import asynccontextmanager
+        from api_core.exceptions import AuthenticationError
+        
+        # Mock session context to avoid database connection issues
+        @asynccontextmanager
+        async def mock_session_context():
+            mock_session = MagicMock()
+            yield mock_session
+        
+        # Mock auth service to raise AuthenticationError for invalid email
+        mock_auth_service = MagicMock()
+        mock_auth_service.authenticate_user = AsyncMock(
+            side_effect=AuthenticationError("Invalid email or password")
         )
         
-        assert response.status_code == 401
+        with patch("api_core.api.v1.auth.get_session_context", side_effect=mock_session_context), \
+             patch("api_core.api.v1.auth.get_auth_service", return_value=mock_auth_service):
+            response = client.post(
+                "/api/v1/auth/login",
+                json={
+                    "email": "nonexistent@example.com",
+                    "password": "TestPassword123!",
+                },
+            )
+            
+            assert response.status_code == 401
 
     # Note: The following tests require database setup
     # They are commented out as examples - uncomment when you have proper test fixtures
@@ -126,7 +144,8 @@ class TestSignupEndpoint:
             },
         )
         
-        assert response.status_code == 400
+        # Pydantic validation fails before endpoint code runs, returning 422
+        assert response.status_code == 422
 
     def test_signup_missing_fields(self, client: TestClient):
         """Test signup with missing fields."""
@@ -186,15 +205,33 @@ class TestPasswordResetEndpoints:
 
     def test_confirm_password_reset_invalid_token(self, client: TestClient):
         """Test password reset confirmation with invalid token."""
-        response = client.post(
-            "/api/v1/auth/reset-password/confirm",
-            json={
-                "token": "invalid_token",
-                "new_password": "NewPassword123!",
-            },
+        from unittest.mock import patch, AsyncMock, MagicMock
+        from contextlib import asynccontextmanager
+        from api_core.exceptions import ValidationError
+        
+        # Mock session context to avoid database connection issues
+        @asynccontextmanager
+        async def mock_session_context():
+            mock_session = MagicMock()
+            yield mock_session
+        
+        # Mock auth service to raise ValidationError for invalid token
+        mock_auth_service = MagicMock()
+        mock_auth_service.confirm_password_reset = AsyncMock(
+            side_effect=ValidationError("Invalid or expired password reset token")
         )
         
-        assert response.status_code == 400
+        with patch("api_core.api.v1.auth.get_session_context", side_effect=mock_session_context), \
+             patch("api_core.api.v1.auth.get_auth_service", return_value=mock_auth_service):
+            response = client.post(
+                "/api/v1/auth/reset-password/confirm",
+                json={
+                    "token": "invalid_token",
+                    "new_password": "NewPassword123!",
+                },
+            )
+            
+            assert response.status_code == 400
 
     # Note: The following tests require database setup
     # They are commented out as examples - uncomment when you have proper test fixtures
