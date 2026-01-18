@@ -1,10 +1,34 @@
 """Pytest configuration and fixtures for integration worker tests."""
 
+import os
+import sys
 import pytest
 from datetime import datetime, timezone, timedelta
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
 import uuid
+
+# Add py_common to Python path
+project_root = Path(__file__).parent.parent.parent
+py_common_path = project_root / "libs" / "py-common" / "src"
+if py_common_path.exists() and str(py_common_path) not in sys.path:
+    sys.path.insert(0, str(py_common_path))
+
+# Set environment variables before any imports that might use them
+# This prevents Pydantic validation errors from environment variables with trailing spaces or missing values
+os.environ.pop("DATABASE_URL", None)
+os.environ["DATABASE_URL"] = "postgresql://test:test@localhost:5432/test"
+os.environ.pop("INTERNAL_API_KEY_ENABLED", None)
+os.environ["INTERNAL_API_KEY_ENABLED"] = "false"
+
+# Set required Azure AD environment variables for integration-worker Settings
+os.environ.pop("AZURE_AD_CLIENT_ID", None)
+os.environ["AZURE_AD_CLIENT_ID"] = "test-client-id"
+os.environ.pop("AZURE_AD_TENANT_ID", None)
+os.environ["AZURE_AD_TENANT_ID"] = "test-tenant-id"
+os.environ.pop("AZURE_AD_CLIENT_SECRET", None)
+os.environ["AZURE_AD_CLIENT_SECRET"] = "test-client-secret"
 
 
 @pytest.fixture

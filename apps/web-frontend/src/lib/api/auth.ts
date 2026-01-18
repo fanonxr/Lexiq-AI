@@ -226,7 +226,9 @@ export async function logout(): Promise<LogoutResponse> {
   } catch (error) {
     // Even if backend call fails, we should still remove tokens client-side
     // This ensures logout works even if backend is unavailable
-    logger.warn("Backend logout call failed, but continuing with client-side logout", error instanceof Error ? error : new Error(String(error)));
+    logger.warn("Backend logout call failed, but continuing with client-side logout", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return { message: "Logged out successfully" };
   }
 }

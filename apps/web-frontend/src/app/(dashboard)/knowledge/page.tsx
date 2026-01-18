@@ -11,9 +11,6 @@ import { FileText } from "lucide-react";
 import { useFiles, useUploadFile, useDeleteFile, useReindexFile, useQueryKnowledgeBase } from "@/hooks/useKnowledgeBase";
 import { logger } from "@/lib/logger";
 
-// Force dynamic rendering because layout uses client components
-export const dynamic = "force-dynamic";
-
 /**
  * Knowledge Base Page
  * 

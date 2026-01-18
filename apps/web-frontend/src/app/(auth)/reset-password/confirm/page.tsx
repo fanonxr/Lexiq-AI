@@ -1,21 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { confirmPasswordReset } from "@/lib/api/auth";
 import { FormInput } from "@/components/forms/FormInput";
 import { FormButton } from "@/components/forms/FormButton";
 import { FormError } from "@/components/forms/FormError";
-import { Lock, CheckCircle2, AlertCircle } from "lucide-react";
+import { Lock, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { logger } from "@/lib/logger";
 import { validateForm, getFieldErrors, resetPasswordSchema } from "@/lib/validation/schemas";
 
 /**
- * Confirm password reset page
+ * Confirm password reset page content
  * Allows user to set a new password using the reset token from the email
  */
-export default function ConfirmPasswordResetPage() {
+function ConfirmPasswordResetPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [token, setToken] = useState<string>("");
@@ -68,7 +68,7 @@ export default function ConfirmPasswordResetPage() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to reset password";
       setFormError(errorMessage);
-      logger.error("Password reset confirmation failed", error);
+      logger.error("Password reset confirmation failed", error instanceof Error ? error : new Error(String(error)));
     } finally {
       setIsSubmitting(false);
     }
@@ -214,3 +214,25 @@ export default function ConfirmPasswordResetPage() {
   );
 }
 
+/**
+ * Confirm password reset page
+ * Wrapped in Suspense for static export compatibility
+ */
+export default function ConfirmPasswordResetPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+        <div className="w-full max-w-md">
+          <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900 p-6 sm:p-8">
+            <div className="flex flex-col items-center justify-center space-y-4 text-center">
+              <Loader2 className="h-12 w-12 animate-spin text-white" />
+              <h2 className="text-xl font-semibold text-white">Loading...</h2>
+            </div>
+          </div>
+        </div>
+      </div>
+    }>
+      <ConfirmPasswordResetPageContent />
+    </Suspense>
+  );
+}

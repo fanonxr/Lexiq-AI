@@ -70,7 +70,7 @@ function GoogleCallbackPageContent() {
         hasState: !!state,
       });
       
-      handleGoogleCallback(code, normalizedRedirectUri, state)
+      handleGoogleCallback(code, normalizedRedirectUri, state ?? undefined)
         .then((response) => {
           // Tokens are already stored by handleGoogleCallback
           logger.info("Google OAuth callback successful", {
@@ -159,7 +159,7 @@ function GoogleCallbackPageContent() {
     } else {
       // Try user auth as default
       setAuthType("user");
-      handleGoogleCallback(code, normalizedRedirectUri, state)
+      handleGoogleCallback(code, normalizedRedirectUri, state ?? undefined)
         .then((response) => {
           setStatus("success");
           setMessage("Signed in with Google successfully!");

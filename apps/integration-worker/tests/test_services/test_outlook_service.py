@@ -26,20 +26,21 @@ class TestOutlookService:
             with patch.object(service, 'get_valid_access_token', return_value='test-token'):
                 with patch('httpx.AsyncClient') as mock_client:
                     # Mock Microsoft Graph API response
-                    mock_response = AsyncMock()
+                    mock_response = MagicMock()
                     mock_response.json.return_value = {
                         'value': [mock_outlook_event]
                     }
                     mock_response.raise_for_status = MagicMock()
                     
-                    mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                        return_value=mock_response
-                    )
+                    mock_http_client = MagicMock()
+                    mock_http_client.get = AsyncMock(return_value=mock_response)
+                    mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_http_client)
+                    mock_client.return_value.__aexit__ = AsyncMock(return_value=None)
                     
                     # Mock user query
-                    mock_user_result = AsyncMock()
+                    mock_user_result = MagicMock()
                     mock_user_result.first.return_value = (mock_user.id, mock_user.firm_id)
-                    mock_db_session.execute.return_value = mock_user_result
+                    mock_db_session.execute = AsyncMock(return_value=mock_user_result)
                     
                     # Mock appointment repository
                     with patch.object(service.appointments_repo, 'get_by_idempotency_key', return_value=None):
@@ -97,16 +98,18 @@ class TestOutlookService:
         with patch.object(service.calendar_repo, 'get_by_id', return_value=mock_calendar_integration):
             with patch.object(service, 'get_valid_access_token', return_value='test-token'):
                 with patch('httpx.AsyncClient') as mock_client:
-                    mock_response = AsyncMock()
+                    mock_response = MagicMock()
                     mock_response.json.return_value = {'value': [cancelled_event]}
                     mock_response.raise_for_status = MagicMock()
-                    mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                        return_value=mock_response
-                    )
                     
-                    mock_user_result = AsyncMock()
+                    mock_http_client = MagicMock()
+                    mock_http_client.get = AsyncMock(return_value=mock_response)
+                    mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_http_client)
+                    mock_client.return_value.__aexit__ = AsyncMock(return_value=None)
+                    
+                    mock_user_result = MagicMock()
                     mock_user_result.first.return_value = (mock_user.id, mock_user.firm_id)
-                    mock_db_session.execute.return_value = mock_user_result
+                    mock_db_session.execute = AsyncMock(return_value=mock_user_result)
                     
                     result = await service.sync_calendar(str(mock_calendar_integration.id))
         

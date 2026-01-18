@@ -103,7 +103,7 @@ class StateService:
             )
             raise StateError(
                 message=f"Failed to parse conversation state: {str(e)}",
-                conversation_id=conversation_id,
+                details={"conversation_id": conversation_id},
             ) from e
         except Exception as e:
             logger.error(
@@ -113,7 +113,7 @@ class StateService:
             )
             raise StateError(
                 message=f"Failed to retrieve conversation state: {str(e)}",
-                conversation_id=conversation_id,
+                details={"conversation_id": conversation_id},
             ) from e
 
     async def save_conversation_state(
@@ -132,6 +132,7 @@ class StateService:
             key = self._get_key(state.conversation_id)
             
             # Update metadata timestamp
+            from datetime import datetime
             state.metadata.updated_at = state.metadata.updated_at or datetime.utcnow()
             
             # Truncate old messages if needed
@@ -159,7 +160,7 @@ class StateService:
             )
             raise StateError(
                 message=f"Failed to save conversation state: {str(e)}",
-                conversation_id=state.conversation_id,
+                details={"conversation_id": state.conversation_id},
             ) from e
 
     async def append_message(
@@ -195,7 +196,7 @@ class StateService:
             if state is None:
                 raise StateError(
                     message=f"Conversation not found: {conversation_id}",
-                    conversation_id=conversation_id,
+                    details={"conversation_id": conversation_id},
                 )
             
             # Add message
@@ -229,7 +230,7 @@ class StateService:
             )
             raise StateError(
                 message=f"Failed to append message: {str(e)}",
-                conversation_id=conversation_id,
+                details={"conversation_id": conversation_id},
             ) from e
 
     async def create_conversation(
@@ -259,7 +260,7 @@ class StateService:
             if existing is not None:
                 raise StateError(
                     message=f"Conversation already exists: {conversation_id}",
-                    conversation_id=conversation_id,
+                    details={"conversation_id": conversation_id},
                 )
             
             # Create new state
@@ -292,7 +293,7 @@ class StateService:
             )
             raise StateError(
                 message=f"Failed to create conversation: {str(e)}",
-                conversation_id=conversation_id,
+                details={"conversation_id": conversation_id},
             ) from e
 
     async def clear_conversation(self, conversation_id: str) -> None:
@@ -323,7 +324,7 @@ class StateService:
             )
             raise StateError(
                 message=f"Failed to clear conversation: {str(e)}",
-                conversation_id=conversation_id,
+                details={"conversation_id": conversation_id},
             ) from e
 
     async def extend_ttl(self, conversation_id: str, additional_seconds: Optional[int] = None) -> None:
@@ -345,7 +346,7 @@ class StateService:
             if not exists:
                 raise StateError(
                     message=f"Conversation not found: {conversation_id}",
-                    conversation_id=conversation_id,
+                    details={"conversation_id": conversation_id},
                 )
             
             # Calculate new TTL
@@ -375,7 +376,7 @@ class StateService:
             )
             raise StateError(
                 message=f"Failed to extend TTL: {str(e)}",
-                conversation_id=conversation_id,
+                details={"conversation_id": conversation_id},
             ) from e
 
     async def close(self) -> None:

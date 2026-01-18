@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Link from "next/link";
@@ -101,10 +101,10 @@ const pricingTiers: PricingTier[] = [
 ];
 
 /**
- * Pricing page
+ * Pricing page content
  * Displays pricing tiers with features and usage limits
  */
-export default function PricingPage() {
+function PricingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -142,7 +142,7 @@ export default function PricingPage() {
     );
     
     if (!plan) {
-      logger.error(`Plan not found for tier: ${tierName}`, {
+      logger.error(`Plan not found for tier: ${tierName}`, new Error(`Plan not found for tier: ${tierName}`), {
         availablePlans: plans.map((p) => ({ name: p.name, id: p.id })),
         requestedTier: tierName,
       });
@@ -372,5 +372,28 @@ export default function PricingPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Pricing page
+ * Wrapped in Suspense for static export compatibility
+ */
+export default function PricingPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-900 px-4 py-12 sm:px-6 lg:px-8">
+        <div className="w-full max-w-7xl">
+          <div className="text-center">
+            <Loader2 className="h-12 w-12 animate-spin text-zinc-600 dark:text-zinc-400 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+              Loading pricing...
+            </h2>
+          </div>
+        </div>
+      </div>
+    }>
+      <PricingPageContent />
+    </Suspense>
   );
 }

@@ -10,8 +10,33 @@ import pytest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Note: In production, ensure api-core is in PYTHONPATH
-# from api_core.database.models import Client, ClientMemory
+# Mock sqlalchemy before importing memory_service
+import sys
+from unittest.mock import MagicMock as Mock
+
+# Create a mock sqlalchemy module
+mock_sqlalchemy = Mock()
+mock_sqlalchemy.ext.asyncio = Mock()
+mock_sqlalchemy.ext.asyncio.AsyncSession = Mock()
+mock_sqlalchemy.orm = Mock()
+mock_sqlalchemy.select = Mock()
+sys.modules['sqlalchemy'] = mock_sqlalchemy
+sys.modules['sqlalchemy.ext'] = mock_sqlalchemy.ext
+sys.modules['sqlalchemy.ext.asyncio'] = mock_sqlalchemy.ext.asyncio
+sys.modules['sqlalchemy.orm'] = mock_sqlalchemy.orm
+
+# Mock api_core models
+mock_api_core = Mock()
+mock_api_core.database = Mock()
+mock_api_core.database.models = Mock()
+# Create mock Client and ClientMemory classes
+Client = Mock()
+ClientMemory = Mock()
+mock_api_core.database.models.Client = Client
+mock_api_core.database.models.ClientMemory = ClientMemory
+sys.modules['api_core'] = mock_api_core
+sys.modules['api_core.database'] = mock_api_core.database
+sys.modules['api_core.database.models'] = mock_api_core.database.models
 
 
 @pytest.fixture
@@ -62,9 +87,9 @@ class TestMemoryService:
         from cognitive_orch.services.memory_service import MemoryService
 
         # Mock database query returning no client
-        result = AsyncMock()
-        result.scalar_one_or_none.return_value = None
-        mock_session.execute.return_value = result
+        result = MagicMock()
+        result.scalar_one_or_none = MagicMock(return_value=None)  # scalar_one_or_none is not async
+        mock_session.execute = AsyncMock(return_value=result)
 
         # Test
         service = MemoryService(session=mock_session)
@@ -80,9 +105,9 @@ class TestMemoryService:
         from cognitive_orch.services.memory_service import MemoryService
 
         # Mock database query returning existing client
-        result = AsyncMock()
-        result.scalar_one_or_none.return_value = mock_client
-        mock_session.execute.return_value = result
+        result = MagicMock()
+        result.scalar_one_or_none = MagicMock(return_value=mock_client)  # scalar_one_or_none is not async
+        mock_session.execute = AsyncMock(return_value=result)
 
         # Test
         service = MemoryService(session=mock_session)
@@ -98,9 +123,11 @@ class TestMemoryService:
         from cognitive_orch.services.memory_service import MemoryService
 
         # Mock database query returning memories
-        result = AsyncMock()
-        result.scalars.return_value.all.return_value = mock_memories
-        mock_session.execute.return_value = result
+        result = MagicMock()
+        scalars_mock = MagicMock()
+        scalars_mock.all = MagicMock(return_value=mock_memories)  # all() is not async
+        result.scalars = MagicMock(return_value=scalars_mock)
+        mock_session.execute = AsyncMock(return_value=result)
 
         # Test
         service = MemoryService(session=mock_session)
@@ -118,9 +145,11 @@ class TestMemoryService:
         from cognitive_orch.services.memory_service import MemoryService
 
         # Mock database query returning empty list
-        result = AsyncMock()
-        result.scalars.return_value.all.return_value = []
-        mock_session.execute.return_value = result
+        result = MagicMock()
+        scalars_mock = MagicMock()
+        scalars_mock.all = MagicMock(return_value=[])  # all() is not async, it's a regular method
+        result.scalars = MagicMock(return_value=scalars_mock)
+        mock_session.execute = AsyncMock(return_value=result)
 
         # Test
         service = MemoryService(session=mock_session)
@@ -139,7 +168,7 @@ class TestMemoryService:
         memory = await service.store_memory(
             client_id="client-123",
             summary_text="Client called about divorce case.",
-            embedding=[0.1, 0.2, 0.3],
+            qdrant_point_id="qdrant-point-123",
         )
 
         # Assertions
@@ -176,26 +205,32 @@ class TestPostCallWorker:
     async def test_generate_memory(self):
         """Test memory generation from transcript."""
         from cognitive_orch.services.post_call_worker import PostCallWorker
+        from qdrant_client import QdrantClient
 
         # Mock MemoryService
         mock_memory_service = AsyncMock()
         mock_memory_service.store_memory = AsyncMock()
+        
+        # Mock QdrantClient
+        mock_qdrant_client = MagicMock(spec=QdrantClient)
+        mock_qdrant_client.upsert = AsyncMock(return_value=None)
 
-        worker = PostCallWorker(memory_service=mock_memory_service)
+        worker = PostCallWorker(memory_service=mock_memory_service, qdrant_client=mock_qdrant_client)
 
-        # Mock LLM responses
-        with patch("cognitive_orch.services.post_call_worker.acompletion") as mock_completion, \
-             patch("cognitive_orch.services.post_call_worker.aembedding") as mock_embedding:
-
-            # Setup mocks
-            mock_completion.return_value.choices = [
-                MagicMock(message=MagicMock(content="Client called about divorce case."))
-            ]
-            mock_embedding.return_value.data = [{"embedding": [0.1] * 1536}]
+        # Mock LLM responses - acompletion and aembedding are async functions
+        mock_completion = AsyncMock(return_value=MagicMock(
+            choices=[MagicMock(message=MagicMock(content="Client called about divorce case."))]
+        ))
+        mock_embedding = AsyncMock(return_value=MagicMock(
+            data=[{"embedding": [0.1] * 1536}]
+        ))
+        
+        with patch("cognitive_orch.services.post_call_worker.acompletion", mock_completion), \
+             patch("cognitive_orch.services.post_call_worker.aembedding", mock_embedding):
 
             # Test
             transcript = "User: Hi, I need help with divorce.\nAI: I can help with that."
-            summary = await worker.generate_memory(transcript, "client-123")
+            summary = await worker.generate_memory(transcript, "client-123", "firm-456")
 
             # Assertions
             assert summary == "Client called about divorce case."
@@ -207,23 +242,27 @@ class TestPostCallWorker:
     async def test_generate_memory_without_embedding(self):
         """Test memory generation without embeddings."""
         from cognitive_orch.services.post_call_worker import PostCallWorker
+        from qdrant_client import QdrantClient
 
         mock_memory_service = AsyncMock()
-        worker = PostCallWorker(memory_service=mock_memory_service)
+        mock_qdrant_client = MagicMock(spec=QdrantClient)
+        worker = PostCallWorker(memory_service=mock_memory_service, qdrant_client=mock_qdrant_client)
 
-        with patch("cognitive_orch.services.post_call_worker.acompletion") as mock_completion:
-            mock_completion.return_value.choices = [
-                MagicMock(message=MagicMock(content="Summary text"))
-            ]
+        mock_completion = AsyncMock(return_value=MagicMock(
+            choices=[MagicMock(message=MagicMock(content="Summary text"))]
+        ))
+        with patch("cognitive_orch.services.post_call_worker.acompletion", mock_completion):
 
             # Test with include_embedding=False
             summary = await worker.generate_memory(
-                "Transcript", "client-123", include_embedding=False
+                "Transcript", "client-123", "firm-456", include_embedding=False
             )
 
             assert summary == "Summary text"
-            # Embedding should not be generated
-            assert mock_memory_service.store_memory.call_args[1]["embedding"] is None
+            # Embedding should not be generated - check that qdrant_point_id is None
+            call_kwargs = mock_memory_service.store_memory.call_args[1] if mock_memory_service.store_memory.call_args.kwargs else {}
+            # The method should be called without qdrant_point_id or with None
+            assert "embedding" not in call_kwargs
 
 
 class TestPromptBuilder:

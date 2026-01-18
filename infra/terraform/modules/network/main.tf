@@ -14,20 +14,17 @@ resource "azurerm_virtual_network" "main" {
 }
 
 # Compute Subnet (for Container Apps)
+# Note: When using infrastructure_subnet_id in Container Apps Environment,
+# the subnet should NOT be delegated. Container Apps will manage it automatically.
 resource "azurerm_subnet" "compute" {
   name                 = "${var.project_name}-compute-subnet-${var.environment}"
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = [var.compute_subnet_cidr]
 
-  # Service delegation for Container Apps (will be used in Phase 2)
-  delegation {
-    name = "Microsoft.App/environments"
-    service_delegation {
-      name    = "Microsoft.App/environments"
-      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
-    }
-  }
+  # Note: Delegation is NOT needed when using infrastructure_subnet_id
+  # Container Apps Environment will automatically manage the subnet
+  # Delegation is only needed if NOT using infrastructure_subnet_id
 }
 
 # Data Subnet (for databases)

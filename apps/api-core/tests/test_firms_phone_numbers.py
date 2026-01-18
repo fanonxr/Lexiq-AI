@@ -236,12 +236,12 @@ async def test_provision_phone_number_success(session, mock_twilio_service):
     mock_twilio_service.list_phone_numbers = AsyncMock(return_value=[])
     mock_twilio_service.provision_phone_number = AsyncMock(return_value=mock_phone_number)
     mock_twilio_service.update_phone_number_webhook = AsyncMock(return_value=mock_phone_number)
+    mock_twilio_service.find_subaccount_by_name = AsyncMock(return_value=None)
     
     # Create service with mocked Twilio service
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
-    with patch("api_core.services.firms_service.get_twilio_service", return_value=mock_twilio_service):
+    with patch("api_core.services.twilio_service.get_twilio_service", return_value=mock_twilio_service):
         with patch("os.getenv", return_value="https://api.example.com"):
             result = await service.provision_phone_number(
                 firm_id=firm.id,
@@ -262,8 +262,7 @@ async def test_provision_phone_number_success(session, mock_twilio_service):
 @pytest.mark.asyncio
 async def test_provision_phone_number_firm_not_found(session, mock_twilio_service):
     """Test provisioning phone number for non-existent firm."""
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
     with pytest.raises(NotFoundError):
         await service.provision_phone_number(
@@ -287,8 +286,7 @@ async def test_provision_phone_number_already_has_number(session, mock_twilio_se
     session.add(firm)
     await session.commit()
     
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
     # Should return existing number
     result = await service.provision_phone_number(
@@ -325,10 +323,9 @@ async def test_provision_phone_number_existing_subaccount(session, mock_twilio_s
     mock_twilio_service.update_phone_number_webhook = AsyncMock(return_value=mock_phone_number)
     mock_twilio_service.find_subaccount_by_name = AsyncMock(return_value=None)
     
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
-    with patch("api_core.services.firms_service.get_twilio_service", return_value=mock_twilio_service):
+    with patch("api_core.services.twilio_service.get_twilio_service", return_value=mock_twilio_service):
         with patch("os.getenv", return_value="https://api.example.com"):
             result = await service.provision_phone_number(
                 firm_id=firm.id,
@@ -363,10 +360,9 @@ async def test_provision_phone_number_existing_number_in_subaccount(session, moc
     mock_twilio_service.get_subaccount_auth_token = AsyncMock(return_value="auth_token_123")
     mock_twilio_service.list_phone_numbers = AsyncMock(return_value=[existing_number])
     
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
-    with patch("api_core.services.firms_service.get_twilio_service", return_value=mock_twilio_service):
+    with patch("api_core.services.twilio_service.get_twilio_service", return_value=mock_twilio_service):
         with patch("os.getenv", return_value="https://api.example.com"):
             result = await service.provision_phone_number(
                 firm_id=firm.id,
@@ -387,7 +383,7 @@ async def test_provision_phone_number_twilio_error(session, mock_twilio_service)
     session.add(firm)
     await session.commit()
     
-    # Mock Twilio error
+    # Mock Twilio error - create_subaccount will fail
     mock_twilio_service.create_subaccount = AsyncMock(
         side_effect=ExternalServiceError(
             message="Twilio API error",
@@ -395,19 +391,20 @@ async def test_provision_phone_number_twilio_error(session, mock_twilio_service)
             details={"error": "API failure"},
         )
     )
+    mock_twilio_service.find_subaccount_by_name = AsyncMock(return_value=None)
     
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
-    with patch("api_core.services.firms_service.get_twilio_service", return_value=mock_twilio_service):
-        with pytest.raises(ExternalServiceError) as exc_info:
-            await service.provision_phone_number(
-                firm_id=firm.id,
-                area_code=None,
-                user_id=None,
-            )
-        
-        assert exc_info.value.service == "Twilio"
+    with patch("api_core.services.twilio_service.get_twilio_service", return_value=mock_twilio_service):
+        with patch("os.getenv", return_value="https://api.example.com"):
+            with pytest.raises(ExternalServiceError) as exc_info:
+                await service.provision_phone_number(
+                    firm_id=firm.id,
+                    area_code=None,
+                    user_id=None,
+                )
+            
+            assert exc_info.value.details.get("service") == "Twilio"
 
 
 @pytest.mark.asyncio
@@ -423,8 +420,7 @@ async def test_get_firm_phone_number_success(session):
     session.add(firm)
     await session.commit()
     
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
     result = await service.get_firm_phone_number(
         firm_id=firm.id,
@@ -444,8 +440,7 @@ async def test_get_firm_phone_number_not_found(session):
     session.add(firm)
     await session.commit()
     
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
     result = await service.get_firm_phone_number(
         firm_id=firm.id,
@@ -470,8 +465,7 @@ async def test_get_firm_by_phone_number_service(session):
     session.add(firm)
     await session.commit()
     
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
     result = await service.get_firm_by_phone_number("+15551234567")
     
@@ -503,11 +497,11 @@ async def test_provision_phone_number_with_area_code(session, mock_twilio_servic
     mock_twilio_service.list_phone_numbers = AsyncMock(return_value=[])
     mock_twilio_service.provision_phone_number = AsyncMock(return_value=mock_phone_number)
     mock_twilio_service.update_phone_number_webhook = AsyncMock(return_value=mock_phone_number)
+    mock_twilio_service.find_subaccount_by_name = AsyncMock(return_value=None)
     
-    repo = FirmsRepository(session)
-    service = FirmsService(repo)
+    service = FirmsService(session)
     
-    with patch("api_core.services.firms_service.get_twilio_service", return_value=mock_twilio_service):
+    with patch("api_core.services.twilio_service.get_twilio_service", return_value=mock_twilio_service):
         with patch("os.getenv", return_value="https://api.example.com"):
             result = await service.provision_phone_number(
                 firm_id=firm.id,

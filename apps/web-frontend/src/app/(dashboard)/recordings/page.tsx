@@ -24,9 +24,6 @@ const AudioPlayer = lazy(() =>
 // Import types for use in this file
 import type { AudioPlayerRef, TranscriptSegment } from "@/components/inbox/AudioPlayer";
 
-// Force dynamic rendering because layout uses client components
-export const dynamic = "force-dynamic";
-
 /**
  * Recordings/Inbox Page
  * 

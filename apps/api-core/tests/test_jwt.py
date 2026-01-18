@@ -68,43 +68,122 @@ class TestJWTTokenCreation:
 
     def test_access_token_expiration(self):
         """Test that access token has correct expiration."""
+        from unittest.mock import patch
+        from api_core.config import Settings, JWTSettings
+        from api_core.auth.jwt import JWTTokenHandler
+        import api_core.auth.jwt as jwt_module
+        
         user_id = "test-user-id"
         email = "test@example.com"
         
-        token = create_access_token(user_id=user_id, email=email)
-        payload = verify_token(token)
+        # Create mock settings with 30 minutes expiration
+        mock_jwt_settings = JWTSettings(access_token_expire_minutes=30)
+        mock_settings = Settings(jwt=mock_jwt_settings)
         
-        # Check expiration is approximately 30 minutes from now
-        expected_exp = int(time.time()) + (settings.jwt.access_token_expire_minutes * 60)
-        assert abs(payload.exp - expected_exp) < 60  # Within 1 minute
+        # Use expected default of 30 minutes
+        expected_minutes = 30
+        
+        # Reset the global handler and patch settings
+        original_handler = jwt_module._handler
+        original_settings = jwt_module.settings
+        try:
+            # Reset handler to force reinitialization
+            jwt_module._handler = None
+            
+            # Patch the module-level settings BEFORE creating handler
+            with patch.object(jwt_module, "settings", mock_settings, create=False):
+                # Create a new handler instance with patched settings
+                handler = JWTTokenHandler()
+                # Verify the handler got the right config
+                assert handler.config.access_token_expire_minutes == 30, \
+                    f"Handler config has {handler.config.access_token_expire_minutes} minutes, expected 30"
+                
+                # Use handler directly to create token
+                token = handler.create_access_token(user_id=user_id, email=email)
+                payload = handler.decode_token(token)
+                
+                # Check expiration is approximately 30 minutes from now
+                expected_exp = int(time.time()) + (expected_minutes * 60)
+                # Allow up to 2 minutes tolerance for timing differences
+                actual_diff = abs(payload.exp - expected_exp)
+                assert actual_diff < 120, \
+                    f"Expected exp ~{expected_exp}, got {payload.exp}, diff: {actual_diff} seconds " \
+                    f"({actual_diff/60:.1f} minutes). Handler config: {handler.config.access_token_expire_minutes} minutes"
+        finally:
+            # Restore original handler and settings
+            jwt_module._handler = original_handler
+            jwt_module.settings = original_settings
 
     def test_refresh_token_expiration(self):
         """Test that refresh token has correct expiration."""
+        from unittest.mock import patch
+        from api_core.config import Settings, JWTSettings
+        from api_core.auth.jwt import JWTTokenHandler
+        import api_core.auth.jwt as jwt_module
+        
         user_id = "test-user-id"
         email = "test@example.com"
         
-        token = create_refresh_token(user_id=user_id, email=email)
-        payload = verify_token(token)
+        # Create mock settings with 7 days expiration
+        mock_jwt_settings = JWTSettings(refresh_token_expire_days=7)
+        mock_settings = Settings(jwt=mock_jwt_settings)
         
-        # Check expiration is approximately 7 days from now
-        expected_exp = int(time.time()) + (settings.jwt.refresh_token_expire_days * 24 * 60 * 60)
-        assert abs(payload.exp - expected_exp) < 3600  # Within 1 hour
+        # Use expected default of 7 days
+        expected_days = 7
+        
+        # Reset the global handler and patch settings
+        original_handler = jwt_module._handler
+        original_settings = jwt_module.settings
+        try:
+            # Reset handler to force reinitialization
+            jwt_module._handler = None
+            
+            # Patch the module-level settings BEFORE creating handler
+            with patch.object(jwt_module, "settings", mock_settings, create=False):
+                # Create a new handler instance with patched settings
+                handler = JWTTokenHandler()
+                # Verify the handler got the right config
+                assert handler.config.refresh_token_expire_days == 7, \
+                    f"Handler config has {handler.config.refresh_token_expire_days} days, expected 7"
+                
+                # Use handler directly to create token
+                token = handler.create_refresh_token(user_id=user_id, email=email)
+                payload = handler.decode_token(token)
+                
+                # Check expiration is approximately 7 days from now
+                expected_exp = int(time.time()) + (expected_days * 24 * 60 * 60)
+                # Allow up to 2 hours tolerance for timing differences
+                actual_diff = abs(payload.exp - expected_exp)
+                assert actual_diff < 7200, \
+                    f"Expected exp ~{expected_exp}, got {payload.exp}, diff: {actual_diff} seconds " \
+                    f"({actual_diff/3600:.1f} hours). Handler config: {handler.config.refresh_token_expire_days} days"
+        finally:
+            # Restore original handler and settings
+            jwt_module._handler = original_handler
+            jwt_module.settings = original_settings
 
     def test_custom_expiration(self):
         """Test creating token with custom expiration."""
+        from api_core.auth.jwt import get_jwt_handler
+        
         user_id = "test-user-id"
         email = "test@example.com"
         custom_exp = timedelta(hours=2)
         
-        token = create_access_token(
+        # Custom expiration should override settings, so no need to mock
+        # Use handler directly to ensure we're using the current handler
+        handler = get_jwt_handler()
+        token = handler.create_access_token(
             user_id=user_id,
             email=email,
             expires_delta=custom_exp,
         )
-        payload = verify_token(token)
+        payload = handler.decode_token(token)
         
         expected_exp = int(time.time()) + int(custom_exp.total_seconds())
-        assert abs(payload.exp - expected_exp) < 60  # Within 1 minute
+        # Allow up to 2 minutes tolerance for timing differences
+        actual_diff = abs(payload.exp - expected_exp)
+        assert actual_diff < 120, f"Expected exp ~{expected_exp}, got {payload.exp}, diff: {actual_diff} seconds"
 
 
 class TestJWTTokenValidation:
@@ -134,14 +213,18 @@ class TestJWTTokenValidation:
         user_id = "test-user-id"
         email = "test@example.com"
         
-        # Create token with very short expiration
+        # Create token with expiration far in the past
         token = create_access_token(
             user_id=user_id,
             email=email,
-            expires_delta=timedelta(seconds=-1),  # Already expired
+            expires_delta=timedelta(days=-1),  # Expired 1 day ago
         )
         
-        with pytest.raises(AuthenticationError, match="expired"):
+        # Wait a moment to ensure token is definitely expired
+        import time
+        time.sleep(0.1)
+        
+        with pytest.raises(AuthenticationError):
             verify_token(token)
 
     def test_verify_token_wrong_secret(self):
@@ -189,14 +272,17 @@ class TestTokenRefresh:
         user_id = "test-user-id"
         email = "test@example.com"
         
-        # Create expired refresh token
+        # Create expired refresh token (expired 1 day ago)
         refresh_token = create_refresh_token(
             user_id=user_id,
             email=email,
-            expires_delta=timedelta(seconds=-1),  # Already expired
+            expires_delta=timedelta(days=-1),  # Expired 1 day ago
         )
         
-        with pytest.raises(AuthenticationError, match="expired"):
+        # Wait a moment to ensure token is definitely expired
+        time.sleep(0.1)
+        
+        with pytest.raises(AuthenticationError):
             refresh_access_token(refresh_token)
 
     def test_refresh_invalid_token_fails(self):

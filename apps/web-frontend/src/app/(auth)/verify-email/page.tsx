@@ -1,16 +1,17 @@
 "use client";
 
 import type { Metadata } from "next";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { verifyEmail, resendVerificationEmail } from "@/lib/api/auth";
 import { logger } from "@/lib/logger";
+import { Loader2 } from "lucide-react";
 
 /**
- * Email verification page
+ * Email verification page content
  * Verifies user email address using token from query parameter
  */
-export default function VerifyEmailPage() {
+function VerifyEmailPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [status, setStatus] = useState<"verifying" | "success" | "error" | "idle">("idle");
@@ -42,7 +43,7 @@ export default function VerifyEmailPage() {
         setStatus("error");
         const errorMessage = error instanceof Error ? error.message : "Failed to verify email";
         setMessage(errorMessage);
-        logger.error("Email verification failed", error);
+        logger.error("Email verification failed", error instanceof Error ? error : new Error(String(error)));
       });
   }, [searchParams, router]);
 
@@ -60,7 +61,7 @@ export default function VerifyEmailPage() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to resend verification email";
       setMessage(errorMessage);
-      logger.error("Resend verification failed", error);
+      logger.error("Resend verification failed", error instanceof Error ? error : new Error(String(error)));
     } finally {
       setIsResending(false);
     }
@@ -202,3 +203,38 @@ export default function VerifyEmailPage() {
   );
 }
 
+/**
+ * Email verification page
+ * Wrapped in Suspense for static export compatibility
+ */
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+        <div className="w-full max-w-md space-y-8">
+          <div>
+            <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-gray-900">
+              Verify Your Email
+            </h2>
+          </div>
+          <div className="mt-8 space-y-6">
+            <div className="rounded-md bg-blue-50 p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <Loader2 className="h-5 w-5 text-blue-400 animate-spin" />
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-blue-800">
+                    Loading...
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    }>
+      <VerifyEmailPageContent />
+    </Suspense>
+  );
+}

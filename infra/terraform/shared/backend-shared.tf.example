@@ -1,0 +1,36 @@
+# Terraform Backend Configuration for Shared Resources
+# Copy this file to backend-shared.tf and update with your storage account details
+# DO NOT commit backend-shared.tf with actual values to version control
+
+terraform {
+  backend "azurerm" {
+    # Storage Account for Terraform state (shared resources)
+    # Use the same storage account as your environment-specific state, or create a separate one
+    resource_group_name  = "lexiqai-tfstate-rg"  # Update with your Terraform state resource group
+    storage_account_name = "lexiqaitfstatedev"    # Update with your Terraform state storage account (must be globally unique)
+    container_name       = "terraform-state"      # Same container as environment-specific state, or use "tfstate-shared"
+    key                  = "shared/terraform.tfstate"  # Separate key for shared resources
+
+    # Optional: Enable state locking
+    # State locking is automatically enabled with Azure Storage backend
+  }
+}
+
+# Recommended Container Names:
+# - "terraform-state" - If using the same container as environment-specific state (recommended)
+# - "tfstate-shared" - If you want a separate container for shared resources
+#
+# Recommended Key Structure:
+# - "shared/terraform.tfstate" - Keeps shared state separate from environment states
+#
+# Example Key Structure in Container:
+# terraform-state/
+#   ├── dev/terraform.tfstate
+#   ├── staging/terraform.tfstate
+#   ├── prod/terraform.tfstate
+#   └── shared/terraform.tfstate  ← Shared resources state
+#
+# Note: Before using this backend, you need to:
+# 1. Ensure the storage account exists (see docs/foundation/terraform-state-setup.md)
+# 2. Update the values above with your storage account details
+# 3. Run: terraform init -migrate-state (if migrating from local state)

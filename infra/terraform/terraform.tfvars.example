@@ -14,7 +14,8 @@ tenant_id       = "<your-tenant-id>"
 
 # Network Configuration
 vnet_address_space           = ["10.0.0.0/16"]
-compute_subnet_cidr          = "10.0.1.0/24"
+# Container Apps Environment requires at least /23 subnet (512 IP addresses)
+compute_subnet_cidr          = "10.0.0.0/23"  # /23 required for Container Apps (was /24)
 data_subnet_cidr             = "10.0.2.0/24"
 private_endpoint_subnet_cidr = "10.0.3.0/24"
 
@@ -38,11 +39,6 @@ redis_capacity = 0 # C0 for dev
 # redis_capacity = 1 # C1 for prod
 redis_version  = "7.0"
 
-# Azure OpenAI Configuration
-openai_sku_name = "S0" # Standard tier for dev
-# openai_sku_name = "S1" # For prod (higher throughput)
-openai_public_network_access_enabled = true # Set to false for private endpoints
-openai_key_vault_enabled = true # Store API keys in Key Vault
 
 # Model deployments (deploy specific models)
 openai_model_deployments = {
@@ -72,9 +68,74 @@ storage_public_network_access_enabled = true  # Set to false for private endpoin
 storage_blob_soft_delete_retention_days = 7  # Days to retain soft-deleted blobs
 storage_container_soft_delete_retention_days = 7  # Days to retain soft-deleted containers
 
-# Entra ID Configuration (for future use)
-# entra_tenant_domain = "lexiqai.onmicrosoft.com"
-# entra_app_client_id = "<client-id>"
+# Azure AD App Registration Configuration
+# The auth module will create an App Registration with all required settings
+
+# Sign-in audience (who can sign in)
+azure_ad_sign_in_audience = "AzureADMyOrg" # Options: AzureADMyOrg, AzureADMultipleOrgs, AzureADandPersonalMicrosoftAccount, PersonalMicrosoftAccount
+
+# Redirect URIs for OAuth flows
+# SPA redirect URIs (for frontend - Single Page Application)
+azure_ad_spa_redirect_uris = [
+  "http://localhost:3000/auth/google/callback",
+  "http://localhost:3000/auth/outlook/callback",
+  # Add production URLs when deploying:
+  # "https://yourdomain.com/auth/google/callback",
+  # "https://yourdomain.com/auth/outlook/callback",
+]
+
+# Web redirect URIs (for server-side OAuth flows, if needed)
+azure_ad_web_redirect_uris = [
+  # Add API callback URLs if needed:
+  # "https://api.yourdomain.com/auth/callback",
+]
+
+# API Application ID URI (for exposed API)
+# If empty, defaults to api://<client-id>
+# You can customize it, e.g., "api://lexiqai-api"
+azure_ad_api_application_id_uri = ""
+
+# Exposed API scopes (for frontend to request tokens for backend)
+# Default scope is already configured, but you can customize:
+# azure_ad_exposed_api_scopes = [
+#   {
+#     id                         = "1"
+#     admin_consent_display_name = "Access LexiqAI API"
+#     admin_consent_description  = "Allow the application to access LexiqAI API on behalf of the signed-in user"
+#     user_consent_display_name  = "Access LexiqAI API"
+#     user_consent_description   = "Allow the application to access LexiqAI API on your behalf"
+#     value                      = "api.access"
+#     type                       = "User"
+#     enabled                    = true
+#   }
+# ]
+
+# Microsoft Graph API Permissions
+# Default permissions are configured (User.Read, Calendars.ReadWrite, offline_access)
+# You can customize if needed:
+# azure_ad_microsoft_graph_permissions = [
+#   {
+#     id   = "e1fe6dd8-ba31-4d61-89e7-88639da4683d" # User.Read
+#     type = "Scope"
+#   },
+#   {
+#     id   = "37f7f235-527c-4136-accd-4a02d197296e" # Calendars.ReadWrite
+#     type = "Scope"
+#   },
+#   {
+#     id   = "df021288-bdef-4463-88db-98f22de89214" # offline_access
+#     type = "Scope"
+#   }
+# ]
+
+# Client Secret Configuration
+azure_ad_create_client_secret      = true  # Create a client secret (stored in Key Vault)
+azure_ad_client_secret_expiration  = ""    # Optional: Set expiration date (RFC3339 format, e.g., "2025-12-31T23:59:59Z")
+
+# Admin Consent (requires appropriate Azure AD permissions)
+# Set to true to automatically grant admin consent for application permissions
+# Note: This requires "Application Administrator" or "Global Administrator" role
+azure_ad_grant_admin_consent = false
 
 # Common Tags
 common_tags = {

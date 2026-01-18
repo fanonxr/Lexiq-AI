@@ -23,10 +23,6 @@ import {
 import { initiateOutlookOAuth, initiateGoogleOAuth } from "@/lib/api/calendar-integrations";
 import { logger } from "@/lib/logger";
 
-// Force dynamic rendering because layout uses client components
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
 /**
  * Appointments Page
  * 

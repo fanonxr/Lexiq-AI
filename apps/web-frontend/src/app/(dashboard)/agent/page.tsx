@@ -13,9 +13,6 @@ import { cn } from "@/lib/utils";
 import { useAgentConfig, useUpdateAgentConfig, useVoiceOptions, useTestCall, useImproveScript } from "@/hooks/useAgent";
 import { logger } from "@/lib/logger";
 
-// Force dynamic rendering because layout uses client components
-export const dynamic = "force-dynamic";
-
 /**
  * Agent Configuration Page
  * 

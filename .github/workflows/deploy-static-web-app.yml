@@ -1,0 +1,324 @@
+name: Deploy Static Web App
+
+permissions:
+  contents: read
+
+on:
+  # Trigger after CI pipeline completes successfully (for push events)
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
+    branches:
+      - master
+      - develop
+      - prod
+      - feature-*
+      - fix-*
+  # For PRs, we still need to check manually since workflow_run doesn't work for PRs
+  pull_request:
+    branches:
+      - develop
+      - master
+      - prod
+      - feature-*
+      - fix-*
+    paths:
+      - 'apps/web-frontend/**'
+      - '.github/workflows/deploy-static-web-app.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  PROJECT_NAME: lexiqai
+
+jobs:
+  check-prerequisites:
+    name: Check CI Pipeline Status
+    runs-on: ubuntu-latest
+    # Only run for PRs (workflow_run events don't need this check)
+    if: github.event_name == 'pull_request'
+    continue-on-error: true  # Don't fail the workflow if CI check fails - let build jobs decide
+    permissions:
+      contents: read
+      actions: read # Required to read workflow run status
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check CI pipeline workflow status
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            const commitSha = context.payload.pull_request.head.sha;
+            const branch = context.payload.pull_request.head.ref;
+            const maxWaitTime = 600; // 10 minutes - give CI more time
+            const checkInterval = 15; // 15 seconds
+            let elapsed = 0;
+            let relevantRun = null;
+            
+            // Try to find the workflow run, waiting if it's still running
+            while (elapsed < maxWaitTime) {
+              const { data: runs } = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'ci.yml',
+                per_page: 20
+              });
+              
+              // Find the most recent run for this commit SHA or branch
+              relevantRun = runs.workflow_runs.find(run => 
+                run.head_sha === commitSha
+              ) || runs.workflow_runs.find(run => 
+                run.head_branch === branch
+              );
+              
+              if (relevantRun) {
+                core.info(`Found CI pipeline run #${relevantRun.run_number} (status: ${relevantRun.status}, conclusion: ${relevantRun.conclusion || 'pending'})`);
+                
+                // If workflow is still running, wait
+                if (relevantRun.status === 'in_progress' || relevantRun.status === 'queued') {
+                  core.info(`CI pipeline is still ${relevantRun.status}. Waiting... (${elapsed}s elapsed)`);
+                  await new Promise(resolve => setTimeout(resolve, checkInterval * 1000));
+                  elapsed += checkInterval;
+                  continue;
+                }
+                
+                // Workflow has completed
+                break;
+              }
+              
+              // No run found yet, wait a bit
+              if (elapsed === 0) {
+                core.warning(`No CI pipeline run found yet for commit ${commitSha.substring(0, 7)}. Waiting for it to start...`);
+              }
+              await new Promise(resolve => setTimeout(resolve, checkInterval * 1000));
+              elapsed += checkInterval;
+            }
+            
+            if (!relevantRun) {
+              core.warning(`No CI pipeline run found for commit ${commitSha.substring(0, 7)} after ${maxWaitTime}s. Build jobs will proceed but may fail if CI hasn't completed.`);
+              return;
+            }
+            
+            if (relevantRun.status !== 'completed') {
+              core.warning(`CI pipeline is still ${relevantRun.status} after ${maxWaitTime}s. Build jobs will proceed but may fail if CI hasn't completed.`);
+              return;
+            }
+            
+            if (relevantRun.conclusion !== 'success') {
+              core.setFailed(`CI pipeline did not pass. Status: ${relevantRun.conclusion}. Check the CI pipeline workflow (run #${relevantRun.run_number}) for details.`);
+              return;
+            }
+            
+            // Get all jobs from this workflow run to verify all phases passed
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: relevantRun.id
+            });
+            
+            // Check each job status
+            const failedJobs = jobs.jobs.filter(job => 
+              job.conclusion !== 'success' && job.conclusion !== 'skipped'
+            );
+            
+            if (failedJobs.length > 0) {
+              const failedJobNames = failedJobs.map(job => job.name).join(', ');
+              core.setFailed(`Some CI pipeline jobs failed: ${failedJobNames}. All jobs must pass before deployment.`);
+            } else {
+              core.info(`✓ CI pipeline passed (run #${relevantRun.run_number})`);
+              core.info(`  All phases completed: Terraform → Security → Tests`);
+            }
+  
+  verify-ci-passed:
+    name: Verify CI Pipeline Passed
+    runs-on: ubuntu-latest
+    # Only run for workflow_run events to verify CI passed
+    if: github.event_name == 'workflow_run'
+    steps:
+      - name: Verify CI workflow conclusion
+        run: |
+          if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "CI Pipeline did not pass. Conclusion: ${{ github.event.workflow_run.conclusion }}"
+            exit 1
+          fi
+          echo "✓ CI Pipeline passed successfully"
+
+  build:
+    name: Build Static Web App
+    runs-on: ubuntu-latest
+    needs: [check-prerequisites, verify-ci-passed]
+    # Build runs on ALL branches (no branch restriction)
+    # This ensures the app builds successfully on all branches for validation
+    if: |
+      (github.event_name == 'pull_request' && (needs.check-prerequisites.result == 'success' || needs.check-prerequisites.result == 'skipped' || needs.check-prerequisites.result == 'failure')) ||
+      (github.event_name == 'workflow_run' && (needs.verify-ci-passed.result == 'success' || needs.verify-ci-passed.result == 'skipped')) ||
+      (github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          sha: ${{ github.event.workflow_run.head_sha || github.sha }}
+          submodules: true
+          lfs: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/web-frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/web-frontend
+        run: npm ci
+
+      - name: Build Next.js app
+        working-directory: apps/web-frontend
+        env:
+          # Build-time environment variables
+          # These should match your Terraform app_settings
+          NEXT_PUBLIC_ENTRA_ID_TENANT_ID: ${{ secrets.NEXT_PUBLIC_ENTRA_ID_TENANT_ID }}
+          NEXT_PUBLIC_ENTRA_ID_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_ENTRA_ID_CLIENT_ID }}
+          NEXT_PUBLIC_ENTRA_ID_AUTHORITY: ${{ secrets.NEXT_PUBLIC_ENTRA_ID_AUTHORITY || 'https://login.microsoftonline.com/common' }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_ENABLE_GOOGLE_SIGNIN: ${{ secrets.NEXT_PUBLIC_ENABLE_GOOGLE_SIGNIN || 'true' }}
+          NEXT_PUBLIC_ENABLE_EMAIL_OTP: ${{ secrets.NEXT_PUBLIC_ENABLE_EMAIL_OTP || 'true' }}
+          NODE_ENV: production
+        run: npm run build
+
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: |
+          github.ref != 'refs/heads/develop' &&
+          github.ref != 'refs/heads/prod' &&
+          (github.event_name != 'workflow_run' || (github.event.workflow_run.head_branch != 'develop' && github.event.workflow_run.head_branch != 'prod'))
+        with:
+          name: web-frontend-build
+          path: apps/web-frontend/out
+          retention-days: 7
+
+  deploy:
+    name: Deploy Static Web App
+    runs-on: ubuntu-latest
+    needs: build
+    # Deploy rules:
+    # - For PRs: Only deploy if targeting 'develop' (not prod/staging - requires merge first)
+    # - For pushes: Deploy for 'develop' and 'prod' branches
+    # - For workflow_run: Deploy for 'develop' and 'prod' branches
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'develop') ||
+      (github.event_name == 'workflow_run' && (github.event.workflow_run.head_branch == 'develop' || github.event.workflow_run.head_branch == 'prod')) ||
+      (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/prod') ||
+      (github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+      pull-requests: write
+
+    # Determine environment based on branch or input
+    # For PRs, use base.ref (target branch); for workflow_run, use head_branch; for pushes, use ref
+    environment:
+      name: ${{ github.event.inputs.environment || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'prod') || (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'prod') || (github.ref == 'refs/heads/prod') && 'prod' || 'dev' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          sha: ${{ github.event.workflow_run.head_sha || github.sha }}
+          submodules: true
+          lfs: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/web-frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/web-frontend
+        run: npm ci
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [ -n "${{ github.event.inputs.environment }}" ]; then
+            ENV_SUFFIX="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            # For PRs, use the target branch (base.ref)
+            BRANCH="${{ github.event.pull_request.base.ref }}"
+            if [ "$BRANCH" == "prod" ]; then
+              ENV_SUFFIX="prod"
+            else
+              ENV_SUFFIX="dev"
+            fi
+          elif [ "${{ github.event_name }}" == "workflow_run" ]; then
+            # For workflow_run events, use the branch from the triggering workflow
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+            if [ "$BRANCH" == "prod" ]; then
+              ENV_SUFFIX="prod"
+            else
+              ENV_SUFFIX="dev"
+            fi
+          elif [ "${{ github.ref }}" == "refs/heads/prod" ]; then
+            ENV_SUFFIX="prod"
+          elif [ "${{ github.ref }}" == "refs/heads/develop" ]; then
+            ENV_SUFFIX="dev"
+          else
+            ENV_SUFFIX="dev"
+          fi
+          echo "environment=${ENV_SUFFIX}" >> $GITHUB_OUTPUT
+          echo "swa_name=${{ env.PROJECT_NAME }}-web-${ENV_SUFFIX}" >> $GITHUB_OUTPUT
+          echo "Environment: ${ENV_SUFFIX}"
+          echo "Static Web App: ${{ env.PROJECT_NAME }}-web-${ENV_SUFFIX}"
+
+      - name: Build Next.js app
+        working-directory: apps/web-frontend
+        env:
+          # Build-time environment variables
+          # These should match your Terraform app_settings
+          NEXT_PUBLIC_ENTRA_ID_TENANT_ID: ${{ secrets.NEXT_PUBLIC_ENTRA_ID_TENANT_ID }}
+          NEXT_PUBLIC_ENTRA_ID_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_ENTRA_ID_CLIENT_ID }}
+          NEXT_PUBLIC_ENTRA_ID_AUTHORITY: ${{ secrets.NEXT_PUBLIC_ENTRA_ID_AUTHORITY || 'https://login.microsoftonline.com/common' }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_ENABLE_GOOGLE_SIGNIN: ${{ secrets.NEXT_PUBLIC_ENABLE_GOOGLE_SIGNIN || 'true' }}
+          NEXT_PUBLIC_ENABLE_EMAIL_OTP: ${{ secrets.NEXT_PUBLIC_ENABLE_EMAIL_OTP || 'true' }}
+          NODE_ENV: production
+        run: npm run build
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "/apps/web-frontend"
+          api_location: ""  # No API functions for static export
+          output_location: "out"  # Next.js static export outputs to 'out' directory
+          skip_app_build: true  # We build manually above
+          skip_api_build: true
+
+      - name: Output deployment URL
+        run: |
+          echo "Static Web App deployed!"
+          echo "Check the deployment status in Azure Portal"

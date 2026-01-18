@@ -37,12 +37,15 @@ func TestRingBuffer_WriteOverflow(t *testing.T) {
 	if rb.Available() != 4 {
 		t.Errorf("Expected available 4, got %d", rb.Available())
 	}
+	if !rb.IsFull() {
+		t.Error("Expected buffer to be full after writing size-1 bytes")
+	}
 
-	// Write more (should stop when full)
+	// Write more (should stop when full - buffer is already full, so 0 bytes written)
 	data2 := []byte{5, 6}
 	written := rb.Write(data2)
-	if written != 1 {
-		t.Errorf("Expected to write 1 byte (buffer full), got %d", written)
+	if written != 0 {
+		t.Errorf("Expected to write 0 bytes (buffer already full), got %d", written)
 	}
 	if rb.Available() != 4 {
 		t.Errorf("Expected available 4 after overflow, got %d", rb.Available())
