@@ -1,0 +1,139 @@
+name: Setup GitHub Environments
+
+# This workflow creates GitHub Environments declaratively
+# 
+# IMPORTANT: This workflow should run BEFORE other workflows that use environments.
+# It runs automatically on push to main branches (idempotent - safe to run multiple times).
+# 
+# Workflows that depend on environments:
+# - terraform-apply.yml (requires dev, prod)
+# - deploy-container-apps.yml (uses dev, prod)
+# - deploy-static-web-app.yml (uses dev, prod)
+#
+# After environments are created, this workflow is idempotent and can run safely anytime.
+
+permissions:
+  contents: read
+  environments: write  # Required to create/modify environments
+
+on:
+  # Run automatically on push to main branches (idempotent - safe to run multiple times)
+  push:
+    branches:
+      - master
+      - main
+      - develop
+    paths:
+      - '.github/workflows/setup-environments.yml'
+  # Run automatically on repository creation
+  repository_dispatch:
+    types: [setup-environments]
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      create_all:
+        description: 'Create all environments (dev, prod)'
+        required: false
+        type: boolean
+        default: true
+      environment_name:
+        description: 'Create specific environment (dev or prod)'
+        required: false
+        type: choice
+        options:
+          - dev
+          - prod
+
+jobs:
+  create-environments:
+    name: Create GitHub Environments
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create dev environment
+        if: |
+          (github.event.inputs.create_all == 'true' || github.event.inputs.environment_name == 'dev') ||
+          (github.event.inputs.create_all == '' && github.event.inputs.environment_name == '')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.repos.getEnvironment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                environment_name: 'dev'
+              });
+              core.info('Environment "dev" already exists');
+            } catch (error) {
+              if (error.status === 404) {
+                await github.rest.repos.createOrUpdateEnvironment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  environment_name: 'dev',
+                  deployment_branch_policy: {
+                    protected_branches: false,
+                    custom_branch_policies: true
+                  }
+                });
+                core.info('✅ Created environment "dev"');
+              } else {
+                throw error;
+              }
+            }
+
+      - name: Create prod environment
+        if: |
+          (github.event.inputs.create_all == 'true' || github.event.inputs.environment_name == 'prod') ||
+          (github.event.inputs.create_all == '' && github.event.inputs.environment_name == '')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.repos.getEnvironment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                environment_name: 'prod'
+              });
+              core.info('Environment "prod" already exists');
+            } catch (error) {
+              if (error.status === 404) {
+                await github.rest.repos.createOrUpdateEnvironment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  environment_name: 'prod',
+                  deployment_branch_policy: {
+                    protected_branches: false,
+                    custom_branch_policies: true
+                  },
+                  // Optional: Uncomment to require manual approval for production
+                  // reviewers: [{
+                  //   type: 'User',
+                  //   id: YOUR_GITHUB_USER_ID  // Replace with your GitHub user ID
+                  // }]
+                });
+                core.info('✅ Created environment "prod"');
+                core.info('💡 Tip: Configure manual approval in Settings → Environments → prod → Required reviewers');
+              } else {
+                throw error;
+              }
+            }
+
+      - name: List all environments
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: environments } = await github.rest.repos.getAllEnvironments({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            
+            core.info('\n📋 Current environments:');
+            environments.environments.forEach(env => {
+              core.info(`  - ${env.name}`);
+            });
+            
+            if (environments.environments.length === 0) {
+              core.warning('No environments found. Make sure the workflow has "environments: write" permission.');
+            }

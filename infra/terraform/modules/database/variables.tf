@@ -115,6 +115,12 @@ variable "compute_subnet_end_ip" {
   default     = ""
 }
 
+variable "azure_ad_auth_enabled" {
+  description = "Enable Azure AD authentication for PostgreSQL (requires Managed Identity to be configured as admin in main.tf)"
+  type        = bool
+  default     = false
+}
+
 variable "common_tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)

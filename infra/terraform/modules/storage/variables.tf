@@ -48,6 +48,22 @@ variable "public_network_access_enabled" {
   default     = true # Can be restricted with private endpoints later
 }
 
+variable "network_rules" {
+  description = "Network rules for storage account (optional). If null, default action is Allow."
+  type = object({
+    default_action             = string       # "Allow" or "Deny"
+    bypass                     = list(string) # ["AzureServices", "Logging", "Metrics"]
+    ip_rules                   = list(string) # List of IP addresses/CIDR blocks
+    virtual_network_subnet_ids = list(string) # List of subnet resource IDs
+  })
+  default = null
+  validation {
+    # Use try() to avoid accessing attributes on null during validation evaluation.
+    condition     = var.network_rules == null || contains(["Allow", "Deny"], try(var.network_rules.default_action, ""))
+    error_message = "Network rules default_action must be 'Allow' or 'Deny'."
+  }
+}
+
 variable "versioning_enabled" {
   description = "Enable blob versioning for document recovery"
   type        = bool

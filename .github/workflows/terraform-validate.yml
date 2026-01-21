@@ -35,18 +35,14 @@ jobs:
           terraform_version: 1.5.0
 
       - name: Terraform Format Check (Shared)
-        run: |
-          cd infra/terraform/shared
-          terraform fmt -check -recursive || (echo "Format check failed. Run 'terraform fmt -recursive' to fix." && exit 1)
+        working-directory: infra/terraform/shared
+        run: terraform fmt -check -recursive || (echo "Format check failed. Run 'terraform fmt -recursive' to fix." && exit 1)
 
-      - name: Terraform Init (Shared)
+      - name: Terraform Init + Validate (Shared)
+        working-directory: infra/terraform/shared
         run: |
-          cd infra/terraform/shared
-          terraform init -backend=false
-
-      - name: Terraform Validate (Shared)
-        run: |
-          cd infra/terraform/shared
+          terraform init -backend=false -input=false -reconfigure
+          test -d .terraform/modules || (echo "ERROR: .terraform/modules missing after init (shared)" && exit 1)
           terraform validate
 
   validate-environment:
@@ -63,17 +59,27 @@ jobs:
           terraform_version: 1.5.0
 
       - name: Terraform Format Check (Environment)
-        run: |
-          cd infra/terraform
-          terraform fmt -check -recursive || (echo "Format check failed. Run 'terraform fmt -recursive' to fix." && exit 1)
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive || (echo "Format check failed. Run 'terraform fmt -recursive' to fix." && exit 1)
 
-      - name: Terraform Init (Environment)
+      - name: Terraform Init (Environment) (required for modules)
+        working-directory: infra/terraform
         run: |
-          cd infra/terraform
-          terraform init -backend=false
+          terraform init -backend=false -input=false -reconfigure
+          test -d .terraform/modules || (echo "ERROR: .terraform/modules missing after init (environment)" && exit 1)
+
+      - name: Update Provider Lock File
+        working-directory: infra/terraform
+        run: |
+          # Update lock file with checksums for all platforms (Linux, macOS, Windows)
+          terraform providers lock \
+            -platform=darwin_amd64 \
+            -platform=darwin_arm64 \
+            -platform=linux_amd64 \
+            -platform=windows_amd64
 
       - name: Terraform Validate (Environment)
+        working-directory: infra/terraform
         run: |
-          cd infra/terraform
           terraform validate
 

@@ -1,5 +1,6 @@
 # Integration Worker Container App (Celery Worker)
 # Handles background job processing for calendar synchronization
+# NOTE: Depends on init jobs completing (database role grants) before starting
 resource "azurerm_container_app" "integration_worker" {
   name                         = "${var.project_name}-integration-worker-${var.environment}"
   container_app_environment_id = azurerm_container_app_environment.main.id
@@ -11,6 +12,11 @@ resource "azurerm_container_app" "integration_worker" {
     type         = "UserAssigned"
     identity_ids = [var.managed_identity_id]
   }
+
+  # Ensure init jobs are created before this app
+  depends_on = [
+    azurerm_container_app_job.grant_database_roles
+  ]
 
   # Define secrets
   # Format: https://<vault-name>.vault.azure.net/secrets/<secret-name>
@@ -120,6 +126,7 @@ resource "azurerm_container_app" "integration_worker" {
 # Integration Worker Beat Container App (Celery Scheduler)
 # Triggers scheduled tasks: calendar sync every 15 min, token refresh every hour
 # Note: Container App names must be <= 32 characters
+# NOTE: Depends on init jobs completing (database role grants) before starting
 resource "azurerm_container_app" "integration_worker_beat" {
   name                         = "${var.project_name}-iw-beat-${var.environment}"
   container_app_environment_id = azurerm_container_app_environment.main.id
@@ -131,6 +138,11 @@ resource "azurerm_container_app" "integration_worker_beat" {
     type         = "UserAssigned"
     identity_ids = [var.managed_identity_id]
   }
+
+  # Ensure init jobs are created before this app
+  depends_on = [
+    azurerm_container_app_job.grant_database_roles
+  ]
 
   # Define secrets
   # Format: https://<vault-name>.vault.azure.net/secrets/<secret-name>
@@ -211,6 +223,7 @@ resource "azurerm_container_app" "integration_worker_beat" {
 # Integration Worker Webhooks Container App
 # Receives real-time notifications from Microsoft Graph, Google Calendar, etc.
 # Note: Container App names must be <= 32 characters
+# NOTE: Depends on init jobs completing (database role grants) before starting
 resource "azurerm_container_app" "integration_worker_webhooks" {
   name                         = "${var.project_name}-iw-webhooks-${var.environment}"
   container_app_environment_id = azurerm_container_app_environment.main.id
@@ -222,6 +235,11 @@ resource "azurerm_container_app" "integration_worker_webhooks" {
     type         = "UserAssigned"
     identity_ids = [var.managed_identity_id]
   }
+
+  # Ensure init jobs are created before this app
+  depends_on = [
+    azurerm_container_app_job.grant_database_roles
+  ]
 
   # Define secrets
   # Format: https://<vault-name>.vault.azure.net/secrets/<secret-name>

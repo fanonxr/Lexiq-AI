@@ -337,6 +337,121 @@ terraform-shared-output: ## Show outputs from shared resources
 terraform-shared-fmt: ## Format Terraform files for shared resources
 	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd infra/terraform/shared && terraform fmt -recursive'
 
+# Terraform State Storage Management (DEV ONLY - CI/CD handles prod/staging)
+terraform-disable-backend: ## [DEV ONLY] Disable backend configs for shared + dev (signifies local state management)
+	@echo "⚠️  DEV ONLY: This command is for local dev environment only"
+	@echo "   Production and staging are managed by CI/CD pipeline"
+	@echo ""
+	@echo "🔧 Disabling backend configurations..."
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; \
+		cd infra/terraform/shared && \
+		if [ -f backend-shared.tf ]; then \
+			mv backend-shared.tf backend-shared.tf.disabled && \
+			echo "✓ Shared backend disabled"; \
+		else \
+			echo "⚠️  Shared backend already disabled"; \
+		fi'
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; \
+		cd infra/terraform && \
+		if [ -f backend.tf ]; then \
+			mv backend.tf backend.tf.disabled && \
+			echo "✓ Dev environment backend disabled"; \
+		else \
+			echo "⚠️  Dev backend already disabled"; \
+		fi'
+	@echo ""
+	@echo "✅ Backend configurations disabled - Terraform will use local state"
+	@echo "   Run 'make terraform-shared-init' and 'make terraform-init' to reinitialize"
+
+terraform-restore-backend: ## [DEV ONLY] Restore backend configs for shared + dev and migrate states to remote storage
+	@echo "⚠️  DEV ONLY: This command is for local dev environment only"
+	@echo "   Production and staging are managed by CI/CD pipeline"
+	@echo ""
+	@echo "🔄 Restoring backend configurations and migrating states..."
+	@echo ""
+	@echo "📦 Step 1: Restoring shared resources backend..."
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; \
+		cd infra/terraform/shared && \
+		if [ ! -f backend-shared.tf.disabled ]; then \
+			echo "⚠️  Shared backend is not disabled (already using remote state)"; \
+		else \
+			mv backend-shared.tf.disabled backend-shared.tf && \
+			echo "✓ Shared backend restored" && \
+			if [ -f terraform.tfstate ]; then \
+				cp terraform.tfstate terraform.tfstate.local-backup-$$(date +%Y%m%d-%H%M%S) && \
+				echo "✓ Shared local state backed up"; \
+			fi && \
+			echo "📦 Migrating shared state to remote..." && \
+			terraform init -migrate-state && \
+			echo "✅ Shared state migrated to remote storage"; \
+		fi'
+	@echo ""
+	@echo "📦 Step 2: Restoring dev environment backend..."
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; \
+		cd infra/terraform && \
+		if [ ! -f backend.tf.disabled ]; then \
+			echo "⚠️  Dev backend is not disabled (already using remote state)"; \
+		else \
+			mv backend.tf.disabled backend.tf && \
+			echo "✓ Dev backend restored" && \
+			if [ -f terraform.tfstate ]; then \
+				cp terraform.tfstate terraform.tfstate.backup-$$(date +%Y%m%d-%H%M%S) && \
+				echo "✓ Dev local state backed up"; \
+			fi && \
+			echo "📦 Migrating dev state to remote..." && \
+			terraform init -migrate-state && \
+			echo "✅ Dev state migrated to remote storage"; \
+		fi'
+	@echo ""
+	@echo "✅ All backend configurations restored and states migrated!"
+	@echo "   Verify with: make terraform-state-sync"
+
+terraform-state-sync: ## [DEV ONLY] Verify and sync all Terraform states (shared + dev) are in remote storage
+	@echo "⚠️  DEV ONLY: This command is for local dev environment only"
+	@echo "   Production and staging are managed by CI/CD pipeline"
+	@echo ""
+	@echo "📋 Verifying Terraform state storage..."
+	@echo ""
+	@echo "1️⃣  Checking shared resources state..."
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; \
+		cd infra/terraform/shared && \
+		if [ -f backend-shared.tf.disabled ]; then \
+			echo "   ⚠️  Backend disabled - using local state"; \
+		else \
+			if terraform state list > /dev/null 2>&1; then \
+				echo "   ✅ Shared state: Remote (accessible)"; \
+				terraform state list | head -5; \
+				echo "   ... (showing first 5 resources)"; \
+			else \
+				echo "   ❌ Shared state: Not accessible"; \
+			fi; \
+		fi'
+	@echo ""
+	@echo "2️⃣  Checking dev environment state..."
+	@bash -c 'if [ -f .env ]; then set -a; source .env; set +a; fi; \
+		cd infra/terraform && \
+		if [ -f backend.tf.disabled ]; then \
+			echo "   ⚠️  Backend disabled - using local state"; \
+		else \
+			if terraform state list > /dev/null 2>&1; then \
+				echo "   ✅ Dev state: Remote (accessible)"; \
+				terraform state list | head -5; \
+				echo "   ... (showing first 5 resources)"; \
+			else \
+				echo "   ❌ Dev state: Not accessible"; \
+			fi; \
+		fi'
+	@echo ""
+	@echo "3️⃣  Verifying state files in Azure Storage..."
+	@bash -c 'az storage blob list \
+		--container-name terraform-state \
+		--account-name lexiqaitfstate \
+		--auth-mode login \
+		--query "[].{Name:name, Size:properties.contentLength, LastModified:properties.lastModified}" \
+		-o table 2>/dev/null || echo "   ⚠️  Could not verify in Azure Storage (may need permissions - run: make terraform-shared-apply to grant access)"'
+	@echo ""
+	@echo "✅ State verification complete!"
+
 # Phase 4: Migration Scripts
 migrate-acr-images: ## Migrate container images from environment-specific ACR to shared ACR (usage: make migrate-acr-images ENV=dev [SHARED_ACR=lexiqaiacrshared])
 	@if [ -z "$(ENV)" ]; then \
@@ -1177,3 +1292,6 @@ clean: ## Clean build artifacts and temporary files
 	find . -type f -name "*.pyc" -delete
 	find . -type f -name "*.pyo" -delete
 
+postgres-start:
+	@echo "Starting PostgreSQL..."
+	/opt/homebrew/opt/postgresql@14/bin/postgres -D /opt/homebrew/var/postgresql@14
