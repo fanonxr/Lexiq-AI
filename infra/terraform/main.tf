@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/azuread"
       version = "~> 2.47"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
   }
 
   # Backend configuration will be set via backend.tf or backend config
@@ -89,10 +93,6 @@ module "database" {
   private_endpoint_subnet_id = module.network.private_endpoint_subnet_id
   vnet_id                    = module.network.vnet_id
 
-  depends_on = [
-    module.network # Ensure network is fully created before database
-  ]
-
   database_name         = "lexiqai"
   admin_username        = var.postgres_admin_username
   admin_password        = var.postgres_admin_password
@@ -110,6 +110,9 @@ module "database" {
   high_availability_enabled    = var.environment == "prod"
   geo_redundant_backup_enabled = var.environment == "prod"
 
+  # Azure AD Authentication (enabled by default, can be disabled)
+  azure_ad_auth_enabled = true
+
   common_tags = merge(
     var.common_tags,
     {
@@ -117,6 +120,122 @@ module "database" {
       ManagedBy   = "Terraform"
     }
   )
+
+  depends_on = [
+    module.network # Ensure network is fully created before database
+  ]
+}
+
+# Azure AD Administrator for PostgreSQL
+# This must be created AFTER both the database and identity exist
+# to avoid circular dependencies
+resource "azurerm_postgresql_flexible_server_active_directory_administrator" "main" {
+  server_name         = module.database.server_name
+  resource_group_name = azurerm_resource_group.main.name
+  tenant_id           = var.tenant_id
+  object_id           = module.identity.principal_id
+  principal_name      = module.identity.name
+  principal_type      = "ServicePrincipal"
+
+  depends_on = [
+    module.database,
+    module.identity
+  ]
+}
+
+# Grant Database Roles to Managed Identity
+# This automates the SQL execution to grant database-level roles
+# Note: This requires psql to be installed and database password to be available
+# If psql is not available, you can run the script manually: infra/terraform/scripts/grant-postgres-database-roles.sh
+resource "null_resource" "grant_database_roles" {
+  count = var.grant_postgres_database_roles ? 1 : 0
+
+  depends_on = [
+    azurerm_postgresql_flexible_server_active_directory_administrator.main,
+    module.database,
+    module.identity
+  ]
+
+  triggers = {
+    # Re-run if identity or database changes
+    identity_principal_id = module.identity.principal_id
+    identity_name         = module.identity.name
+    server_id             = module.database.server_id
+    database_name         = module.database.database_name
+    server_fqdn           = module.database.server_fqdn
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Check if psql is available
+      if ! command -v psql &> /dev/null; then
+        echo "WARNING: psql not found. Skipping automatic database role grants."
+        echo "The Azure AD administrator has been configured, but database roles need to be granted manually."
+        echo ""
+        echo "To grant database roles, run:"
+        echo "  cd infra/terraform/scripts"
+        echo "  ./grant-postgres-database-roles.sh ${var.environment}"
+        echo ""
+        echo "Or install PostgreSQL client tools:"
+        echo "  macOS: brew install postgresql"
+        echo "  Linux: sudo apt-get install postgresql-client"
+        exit 0  # Don't fail terraform apply - this is optional
+      fi
+      
+      set -e
+
+      echo "Granting database roles to Managed Identity: ${module.identity.name}"
+      echo "Server: ${module.database.server_fqdn}"
+      echo "Database: ${module.database.database_name}"
+      
+      # Export password for psql
+      export PGPASSWORD="${var.postgres_admin_password}"
+      
+      # Create SQL script for better error handling
+      SQL_FILE=$(mktemp)
+      cat > "$SQL_FILE" <<SQL
+-- Grant Database Roles to Managed Identity
+
+-- Create Azure AD user if it doesn't exist
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${module.identity.name}') THEN
+        EXECUTE format('CREATE USER %I FROM EXTERNAL PROVIDER', '${module.identity.name}');
+        RAISE NOTICE 'Created Azure AD user: ${module.identity.name}';
+    ELSE
+        RAISE NOTICE 'Azure AD user already exists: ${module.identity.name}';
+    END IF;
+END
+\$\$;
+
+-- Grant database roles (idempotent - safe to run multiple times)
+ALTER ROLE "${module.identity.name}" GRANT db_datareader;
+ALTER ROLE "${module.identity.name}" GRANT db_datawriter;
+ALTER ROLE "${module.identity.name}" GRANT db_ddladmin;
+
+-- Verify the user exists
+SELECT 
+    rolname AS role_name,
+    'Database roles granted successfully' AS status
+FROM pg_roles 
+WHERE rolname = '${module.identity.name}';
+SQL
+
+      # Execute SQL script
+      psql \
+        "host=${module.database.server_fqdn} port=5432 dbname=${module.database.database_name} user=${var.postgres_admin_username} sslmode=require" \
+        -f "$SQL_FILE"
+      
+      # Clean up
+      rm -f "$SQL_FILE"
+      
+      echo "✓ Database roles granted successfully!"
+    EOT
+
+    environment = {
+      PGPASSWORD = var.postgres_admin_password
+    }
+  }
 }
 
 # Redis Cache Module - MIGRATED TO CONTAINER APP
@@ -174,6 +293,7 @@ module "identity" {
   postgres_server_id = module.database.server_id
   # redis_cache_id is no longer needed - Redis is now containerized
   # redis_cache_id     = module.cache.cache_id
+  storage_account_id = module.storage.storage_account_id
 
   common_tags = merge(
     var.common_tags,
@@ -184,7 +304,8 @@ module "identity" {
   )
 
   depends_on = [
-    module.database # Need database server ID for role assignment
+    module.database, # Need database server ID for role assignment
+    module.storage   # Need storage account ID for role assignment
     # module.cache is no longer needed - Redis is now containerized
   ]
 }
@@ -478,6 +599,8 @@ module "container_apps" {
   # Dependencies
   postgres_fqdn              = module.database.server_fqdn
   postgres_database_name     = "lexiqai"
+  postgres_admin_username    = var.postgres_admin_username
+  managed_identity_name      = module.identity.name
   storage_account_name       = module.storage.storage_account_name
   storage_account_access_key = module.storage.primary_access_key
 

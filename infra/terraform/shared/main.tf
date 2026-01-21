@@ -148,3 +148,104 @@ resource "azurerm_dns_zone" "shared" {
     }
   )
 }
+
+# Terraform State Storage Account
+# Dedicated storage account for Terraform state files (dev, prod, shared)
+# This is separate from application storage accounts used by microservices
+resource "azurerm_resource_group" "tfstate" {
+  name     = "${var.project_name}-tfstate-rg"
+  location = var.azure_location
+
+  tags = merge(
+    var.common_tags,
+    {
+      Environment = "shared"
+      Purpose     = "Terraform State Storage"
+      ManagedBy   = "Terraform"
+    }
+  )
+}
+
+resource "azurerm_storage_account" "tfstate" {
+  name                     = "${replace(var.project_name, "-", "")}tfstate"
+  resource_group_name      = azurerm_resource_group.tfstate.name
+  location                 = azurerm_resource_group.tfstate.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  account_kind             = "StorageV2"
+  min_tls_version          = "TLS1_2"
+
+  # Security: Disable public access
+  allow_nested_items_to_be_public = false
+  public_network_access_enabled   = true # Can be restricted later with private endpoints
+
+  # Enable HTTPS only
+  https_traffic_only_enabled = true
+
+  # Blob properties for state file recovery
+  blob_properties {
+    versioning_enabled = true
+
+    delete_retention_policy {
+      days = 30
+    }
+
+    container_delete_retention_policy {
+      days = 30
+    }
+
+    change_feed_enabled = true
+  }
+
+  tags = merge(
+    var.common_tags,
+    {
+      Environment = "shared"
+      Purpose     = "Terraform State Storage"
+      ManagedBy   = "Terraform"
+    }
+  )
+
+  depends_on = [
+    azurerm_resource_group.tfstate
+  ]
+}
+
+# Container for Terraform state files
+resource "azurerm_storage_container" "tfstate" {
+  name                  = "terraform-state"
+  storage_account_name  = azurerm_storage_account.tfstate.name
+  container_access_type = "private"
+
+  depends_on = [
+    azurerm_storage_account.tfstate
+  ]
+}
+
+# Data source for current Azure client config (for role assignments)
+data "azurerm_client_config" "current" {}
+
+# Grant GitHub Actions OIDC Service Principal access to Terraform state storage
+# This allows GitHub Actions to read/write state files
+resource "azurerm_role_assignment" "github_oidc_tfstate" {
+  scope                = azurerm_storage_account.tfstate.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = module.github_oidc.service_principal_id
+
+  depends_on = [
+    azurerm_storage_account.tfstate,
+    module.github_oidc
+  ]
+}
+
+# Grant current user (running Terraform) access to Terraform state storage
+# This allows you to read/write state files via Azure CLI and Terraform
+resource "azurerm_role_assignment" "current_user_tfstate" {
+  scope                = azurerm_storage_account.tfstate.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azurerm_client_config.current.object_id
+
+  depends_on = [
+    azurerm_storage_account.tfstate
+  ]
+}

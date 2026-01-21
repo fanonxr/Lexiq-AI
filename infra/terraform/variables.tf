@@ -96,6 +96,12 @@ variable "postgres_storage_mb" {
   default     = 32768 # 32 GB
 }
 
+variable "grant_postgres_database_roles" {
+  description = "Automatically grant database roles to Managed Identity via Terraform (requires psql). If false, run scripts/grant-postgres-database-roles.sh manually. Recommended: true for production, false for development"
+  type        = bool
+  default     = true # Default to true for automatic setup
+}
+
 variable "postgres_backup_retention_days" {
   description = "PostgreSQL backup retention in days"
   type        = number

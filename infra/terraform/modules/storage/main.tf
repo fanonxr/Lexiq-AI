@@ -16,6 +16,19 @@ resource "azurerm_storage_account" "main" {
   # Network access
   public_network_access_enabled = var.public_network_access_enabled
 
+  # Network rules (optional - for IP allowlists, VNet restrictions, etc.)
+  # If public_network_access_enabled = false, these rules control access
+  # If public_network_access_enabled = true, these rules can still restrict access
+  dynamic "network_rules" {
+    for_each = var.network_rules != null ? [1] : []
+    content {
+      default_action             = var.network_rules.default_action
+      bypass                     = var.network_rules.bypass
+      ip_rules                   = var.network_rules.ip_rules
+      virtual_network_subnet_ids = var.network_rules.virtual_network_subnet_ids
+    }
+  }
+
   # Allow blob public access (disabled for security)
   allow_nested_items_to_be_public = false
 

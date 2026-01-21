@@ -9,6 +9,17 @@ output "container_app_environment_name" {
   value       = azurerm_container_app_environment.main.name
 }
 
+# Init Jobs Outputs
+output "init_job_grant_database_roles_id" {
+  description = "ID of the database role grant init job"
+  value       = azurerm_container_app_job.grant_database_roles.id
+}
+
+output "init_job_grant_database_roles_name" {
+  description = "Name of the database role grant init job"
+  value       = azurerm_container_app_job.grant_database_roles.name
+}
+
 # Redis Container App Outputs
 output "redis_container_app_id" {
   description = "ID of the Redis container app"

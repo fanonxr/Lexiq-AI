@@ -57,6 +57,18 @@ variable "postgres_database_name" {
   default     = "lexiqai"
 }
 
+variable "postgres_admin_username" {
+  description = "PostgreSQL administrator username"
+  type        = string
+  default     = null
+}
+
+variable "managed_identity_name" {
+  description = "Name of the Managed Identity (for database role grants)"
+  type        = string
+  default     = null
+}
+
 variable "storage_account_name" {
   description = "Name of the Azure Storage Account"
   type        = string

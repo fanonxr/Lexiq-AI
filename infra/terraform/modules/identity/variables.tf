@@ -34,6 +34,12 @@ variable "redis_cache_id" {
   default     = null
 }
 
+variable "storage_account_id" {
+  description = "Resource ID of the Azure Storage Account for RBAC role assignment"
+  type        = string
+  default     = null
+}
+
 variable "common_tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)

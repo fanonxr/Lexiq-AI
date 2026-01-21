@@ -1,0 +1,337 @@
+name: Terraform Apply
+
+# IMPORTANT: This workflow is designed to run AFTER terraform-validate.yml completes successfully.
+# It uses workflow_run trigger to ensure validation passes before applying changes.
+# Manual workflow_dispatch bypasses this check (use with caution).
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC
+
+on:
+  # Trigger after terraform-validate workflow completes successfully
+  # This ensures validation passes before applying changes
+  workflow_run:
+    workflows: ["Terraform Validate"]
+    types:
+      - completed
+    branches:
+      - develop  # Dev environment
+      - prod     # Prod environment
+  # Manual trigger (bypasses validation dependency)
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to apply (dev/prod)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      target:
+        description: 'What to apply (environment/shared/both)'
+        required: true
+        type: choice
+        options:
+          - environment
+          - shared
+          - both
+      skip_validation_check:
+        description: 'Skip validation check (use with caution)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }} # GitHub OIDC service principal client ID
+  TF_STATE_RG: ${{ secrets.TF_STATE_RG }}
+  TF_STATE_STORAGE_ACCOUNT: ${{ secrets.TF_STATE_STORAGE_ACCOUNT }}
+  TF_STATE_CONTAINER: ${{ secrets.TF_STATE_CONTAINER }}
+
+jobs:
+  # Verify terraform-validate workflow passed (for workflow_run events)
+  verify-validation-passed:
+    name: Verify Terraform Validate Passed
+    runs-on: ubuntu-latest
+    # Only run for workflow_run events (when triggered by terraform-validate)
+    if: github.event_name == 'workflow_run'
+    permissions:
+      contents: read
+      actions: read  # Required to read workflow run status
+    steps:
+      - name: Verify validation workflow passed
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const validationRun = context.payload.workflow_run;
+            
+            if (validationRun.conclusion !== 'success') {
+              core.setFailed(
+                `Terraform validation workflow did not pass. Conclusion: ${validationRun.conclusion}\n` +
+                `Workflow run: ${validationRun.html_url}\n` +
+                `Please fix validation errors before applying Terraform changes.`
+              );
+            } else {
+              core.info(`✅ Terraform validation passed (run #${validationRun.run_number})`);
+              core.info(`   Workflow run: ${validationRun.html_url}`);
+            }
+
+  # Verify environments exist before proceeding
+  verify-environments:
+    name: Verify GitHub Environments
+    runs-on: ubuntu-latest
+    needs: [verify-validation-passed]
+    if: always() && (needs.verify-validation-passed.result == 'success' || needs.verify-validation-passed.result == 'skipped')
+    permissions:
+      contents: read
+      environments: read
+    steps:
+      - name: Check if environments exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const requiredEnvs = ['dev', 'prod'];
+            const missingEnvs = [];
+            
+            for (const envName of requiredEnvs) {
+              try {
+                await github.rest.repos.getEnvironment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  environment_name: envName
+                });
+                core.info(`✅ Environment "${envName}" exists`);
+              } catch (error) {
+                if (error.status === 404) {
+                  missingEnvs.push(envName);
+                  core.error(`❌ Environment "${envName}" not found`);
+                } else {
+                  throw error;
+                }
+              }
+            }
+            
+            if (missingEnvs.length > 0) {
+              core.setFailed(
+                `Missing required environments: ${missingEnvs.join(', ')}\n` +
+                `Please run the "Setup GitHub Environments" workflow first:\n` +
+                `Actions → Setup GitHub Environments → Run workflow`
+              );
+            } else {
+              core.info('✅ All required environments exist');
+            }
+
+  # Determine which environment to target
+  determine-environment:
+    name: Determine Environment
+    runs-on: ubuntu-latest
+    needs: [verify-environments]
+    if: always() && (needs.verify-environments.result == 'success' || needs.verify-environments.result == 'skipped')
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      target: ${{ steps.target.outputs.target }}
+    steps:
+      - name: Determine environment
+        id: env
+        run: |
+          if [ -n "${{ github.event.inputs.environment }}" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.event_name }}" == "workflow_run" ]; then
+            # For workflow_run, use the branch from the triggering workflow
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+            if [ "$BRANCH" == "prod" ]; then
+              ENV="prod"
+            elif [ "$BRANCH" == "develop" ]; then
+              ENV="dev"
+            else
+              ENV="dev"  # Default
+            fi
+          elif [ "${{ github.ref }}" == "refs/heads/prod" ]; then
+            ENV="prod"
+          elif [ "${{ github.ref }}" == "refs/heads/develop" ]; then
+            ENV="dev"
+          else
+            ENV="dev"  # Default
+          fi
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+          echo "Targeting environment: ${ENV}"
+
+      - name: Determine target
+        id: target
+        run: |
+          TARGET="${{ github.event.inputs.target || 'both' }}"
+          echo "target=${TARGET}" >> $GITHUB_OUTPUT
+
+  # Validate before apply (reuse existing validation)
+  terraform-validate:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    needs: determine-environment
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          sha: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Format Check (Shared)
+        run: |
+          cd infra/terraform/shared
+          terraform fmt -check -recursive || (echo "Format check failed" && exit 1)
+
+      - name: Terraform Init (Shared)
+        run: |
+          cd infra/terraform/shared
+          terraform init -backend=false
+
+      - name: Terraform Validate (Shared)
+        run: |
+          cd infra/terraform/shared
+          terraform validate
+
+      - name: Terraform Format Check (Environment)
+        run: |
+          cd infra/terraform
+          terraform fmt -check -recursive || (echo "Format check failed" && exit 1)
+
+      - name: Terraform Init (Environment)
+        run: |
+          cd infra/terraform
+          terraform init -backend=false
+
+      - name: Terraform Validate (Environment)
+        run: |
+          cd infra/terraform
+          terraform validate
+
+  # Apply Shared Resources
+  terraform-apply-shared:
+    name: Apply Shared Resources
+    runs-on: ubuntu-latest
+    needs: [determine-environment, terraform-validate]
+    if: needs.determine-environment.outputs.target == 'shared' || needs.determine-environment.outputs.target == 'both'
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          sha: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Configure Backend (Shared)
+        run: |
+          cd infra/terraform/shared
+          cat > backend-shared.tf <<EOF
+          terraform {
+            backend "azurerm" {
+              resource_group_name  = "${{ env.TF_STATE_RG }}"
+              storage_account_name = "${{ env.TF_STATE_STORAGE_ACCOUNT }}"
+              container_name       = "${{ env.TF_STATE_CONTAINER }}"
+              key                  = "shared/terraform.tfstate"
+            }
+          }
+          EOF
+
+      - name: Terraform Init (Shared)
+        run: |
+          cd infra/terraform/shared
+          terraform init
+
+      - name: Terraform Plan (Shared)
+        run: |
+          cd infra/terraform/shared
+          terraform plan -var-file=shared.tfvars -out=tfplan
+
+      - name: Terraform Apply (Shared)
+        run: |
+          cd infra/terraform/shared
+          terraform apply -auto-approve tfplan
+
+  # Apply Environment Resources
+  terraform-apply-environment:
+    name: Apply Environment Resources
+    runs-on: ubuntu-latest
+    needs: [determine-environment, terraform-validate]
+    if: needs.determine-environment.outputs.target == 'environment' || needs.determine-environment.outputs.target == 'both'
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          sha: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Configure Backend (Environment)
+        run: |
+          cd infra/terraform
+          ENV="${{ needs.determine-environment.outputs.environment }}"
+          cat > backend.tf <<EOF
+          terraform {
+            backend "azurerm" {
+              resource_group_name  = "${{ env.TF_STATE_RG }}"
+              storage_account_name = "${{ env.TF_STATE_STORAGE_ACCOUNT }}"
+              container_name       = "${{ env.TF_STATE_CONTAINER }}"
+              key                  = "${ENV}/terraform.tfstate"
+            }
+          }
+          EOF
+
+      - name: Terraform Init (Environment)
+        run: |
+          cd infra/terraform
+          terraform init
+
+      - name: Determine tfvars file
+        id: tfvars
+        run: |
+          ENV="${{ needs.determine-environment.outputs.environment }}"
+          echo "tfvars_file=${ENV}.tfvars" >> $GITHUB_OUTPUT
+
+      - name: Terraform Plan (Environment)
+        run: |
+          cd infra/terraform
+          terraform plan -var-file=${{ steps.tfvars.outputs.tfvars_file }} -out=tfplan
+
+      - name: Terraform Apply (Environment)
+        run: |
+          cd infra/terraform
+          terraform apply -auto-approve tfplan
