@@ -126,6 +126,7 @@ services:
       # Option 2: Use account key (alternative)
       - STORAGE_ACCOUNT_KEY=${STORAGE_ACCOUNT_KEY:-}
       # Option 3: Use Managed Identity (for Azure-hosted services)
+      # NOTE: Set to false for local Docker development (Managed Identity doesn't work locally)
       - STORAGE_USE_MANAGED_IDENTITY=${STORAGE_USE_MANAGED_IDENTITY:-false}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-lexiqai_local}
       - REDIS_URL=redis://redis:6379/0
@@ -309,6 +310,7 @@ services:
       # Option 2: Use account key (alternative)
       - STORAGE_ACCOUNT_KEY=${STORAGE_ACCOUNT_KEY:-}
       # Option 3: Use Managed Identity (for Azure-hosted services)
+      # NOTE: Set to false for local Docker development (Managed Identity doesn't work locally)
       - STORAGE_USE_MANAGED_IDENTITY=${STORAGE_USE_MANAGED_IDENTITY:-false}
       # Embeddings config is loaded from ./apps/document-ingestion/.env via env_file
       # Qdrant Configuration

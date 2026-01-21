@@ -39,8 +39,8 @@ resource "azurerm_postgresql_flexible_server" "main" {
 
   # Authentication
   authentication {
-    active_directory_auth_enabled = false # Will be enabled later with Managed Identity
-    password_auth_enabled         = true
+    active_directory_auth_enabled = var.azure_ad_auth_enabled
+    password_auth_enabled         = true # Keep password auth enabled for backward compatibility
   }
 
   tags = merge(
@@ -63,6 +63,10 @@ resource "azurerm_postgresql_flexible_server_database" "main" {
   charset   = "UTF8"
   collation = "en_US.utf8"
 }
+
+# Note: Azure AD Administrator is created in main.tf to avoid circular dependencies
+# The database module enables Azure AD authentication, but the admin is configured
+# at the root level after both database and identity modules are created
 
 # Note: Vector storage will be handled by Qdrant (separate vector database)
 # PostgreSQL is used for relational data only (users, calls, billing, etc.)

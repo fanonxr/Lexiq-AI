@@ -56,6 +56,11 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
+# Backend configuration files (should not be committed - CI/CD generates them)
+backend.tf
+backend-shared.tf
+!backend.tf.example
+!backend-shared.tf.example
 
 # azure
 .azure/

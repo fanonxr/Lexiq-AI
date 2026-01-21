@@ -51,3 +51,24 @@ output "resource_group_id" {
   description = "Resource ID of the shared resource group"
   value       = azurerm_resource_group.shared.id
 }
+
+# Terraform State Storage Outputs
+output "tfstate_resource_group_name" {
+  description = "Name of the Terraform state storage resource group"
+  value       = azurerm_resource_group.tfstate.name
+}
+
+output "tfstate_storage_account_name" {
+  description = "Name of the Terraform state storage account"
+  value       = azurerm_storage_account.tfstate.name
+}
+
+output "tfstate_storage_account_id" {
+  description = "Resource ID of the Terraform state storage account"
+  value       = azurerm_storage_account.tfstate.id
+}
+
+output "tfstate_container_name" {
+  description = "Name of the Terraform state container"
+  value       = azurerm_storage_container.tfstate.name
+}

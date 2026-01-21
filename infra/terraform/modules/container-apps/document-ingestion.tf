@@ -1,5 +1,6 @@
 # Document Ingestion Container App
 # Processes knowledge base files for RAG: parsing, chunking, embedding, vector storage
+# NOTE: Depends on init jobs completing (database role grants) before starting
 resource "azurerm_container_app" "document_ingestion" {
   name                         = "${var.project_name}-document-ingestion-${var.environment}"
   container_app_environment_id = azurerm_container_app_environment.main.id
@@ -11,6 +12,11 @@ resource "azurerm_container_app" "document_ingestion" {
     type         = "UserAssigned"
     identity_ids = [var.managed_identity_id]
   }
+
+  # Ensure init jobs are created before this app
+  depends_on = [
+    azurerm_container_app_job.grant_database_roles
+  ]
 
   # Define secrets
   # Format: https://<vault-name>.vault.azure.net/secrets/<secret-name>

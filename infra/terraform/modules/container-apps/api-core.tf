@@ -1,5 +1,7 @@
 # API Core Container App
 # Main API service for authentication, user management, billing, and dashboard APIs
+# NOTE: This app depends on init jobs completing (especially database role grants)
+# Init jobs must be run before starting this app for the first time
 resource "azurerm_container_app" "api_core" {
   name                         = "${var.project_name}-api-core-${var.environment}"
   container_app_environment_id = azurerm_container_app_environment.main.id
@@ -11,6 +13,12 @@ resource "azurerm_container_app" "api_core" {
     type         = "UserAssigned"
     identity_ids = [var.managed_identity_id]
   }
+
+  # Ensure init jobs are created before this app
+  # Note: Init jobs are manually triggered, so they must be run before starting this app
+  depends_on = [
+    azurerm_container_app_job.grant_database_roles
+  ]
 
   # Define secrets (must be defined before they can be referenced in env blocks)
   # Secrets reference Key Vault secrets using key_vault_secret_id
@@ -132,6 +140,17 @@ resource "azurerm_container_app" "api_core" {
       env {
         name  = "RABBITMQ_URL"
         value = "amqp://rabbitmq:5672/" # Will reference RabbitMQ container app FQDN
+      }
+
+      # Storage - use Managed Identity
+      env {
+        name  = "STORAGE_ACCOUNT_NAME"
+        value = var.storage_account_name
+      }
+
+      env {
+        name  = "STORAGE_USE_MANAGED_IDENTITY"
+        value = "true"
       }
 
       # Application Insights
