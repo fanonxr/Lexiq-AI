@@ -209,6 +209,24 @@ class StorageSettings(BaseSettings):
         )
 
 
+class QdrantSettings(BaseSettings):
+    """Qdrant vector database configuration (for terminate-account: delete points/collections)."""
+
+    model_config = SettingsConfigDict(env_prefix="QDRANT_", case_sensitive=False)
+
+    url: str = Field(
+        default="http://localhost:6333",
+        description="Qdrant connection URL. Leave default or set empty to skip Qdrant cleanup.",
+    )
+    api_key: Optional[str] = Field(default=None, description="Qdrant API key (e.g. Qdrant Cloud)")
+    timeout: int = Field(default=30, description="Request timeout in seconds")
+
+    @property
+    def is_configured(self) -> bool:
+        """True if Qdrant URL is set and non-empty (so we can run delete operations)."""
+        return bool(self.url and self.url.strip())
+
+
 class JWTSettings(BaseSettings):
     """JWT token configuration."""
 
@@ -308,6 +326,17 @@ class CognitiveOrchSettings(BaseSettings):
     timeout: int = Field(
         default=30,
         description="Request timeout in seconds. Env var: COGNITIVE_ORCH_TIMEOUT"
+    )
+
+
+class TwilioSettings(BaseSettings):
+    """Twilio configuration (phone number pool for terminate/provision)."""
+
+    model_config = SettingsConfigDict(env_prefix="TWILIO_", case_sensitive=False)
+
+    pool_subaccount_sid: Optional[str] = Field(
+        default=None,
+        description="Subaccount SID for the number pool. Numbers returned on account termination are transferred here. If unset, numbers are transferred to the main account.",
     )
 
 
@@ -446,11 +475,13 @@ class Settings(BaseSettings):
     azure_ad_b2c: AzureADB2CSettings = Field(default_factory=AzureADB2CSettings)
     azure_key_vault: AzureKeyVaultSettings = Field(default_factory=AzureKeyVaultSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    qdrant: QdrantSettings = Field(default_factory=QdrantSettings)
     jwt: JWTSettings = Field(default_factory=JWTSettings)
     cors: CorsSettings = Field(default_factory=CorsSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     google: GoogleSettings = Field(default_factory=GoogleSettings)
     cognitive_orch: CognitiveOrchSettings = Field(default_factory=CognitiveOrchSettings)
+    twilio: TwilioSettings = Field(default_factory=TwilioSettings)
     stripe: StripeSettings = Field(default_factory=StripeSettings)
     billing: BillingSettings = Field(default_factory=BillingSettings)
 

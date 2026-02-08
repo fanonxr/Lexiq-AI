@@ -34,7 +34,8 @@ def test_celery_beat_schedule():
     assert "sync-all-calendars" in beat_schedule
     assert "refresh-expiring-tokens" in beat_schedule
     assert "cleanup-sync-logs" in beat_schedule
-    
+    assert "cleanup-orphaned-resources" in beat_schedule
+
     # Verify task names
     assert beat_schedule["sync-all-calendars"]["task"] == \
         "integration_worker.tasks.calendar_sync.sync_all_calendars"
@@ -42,6 +43,8 @@ def test_celery_beat_schedule():
         "integration_worker.tasks.token_refresh.refresh_expiring_tokens"
     assert beat_schedule["cleanup-sync-logs"]["task"] == \
         "integration_worker.tasks.cleanup.cleanup_old_sync_logs"
+    assert beat_schedule["cleanup-orphaned-resources"]["task"] == \
+        "integration_worker.tasks.cleanup.cleanup_orphaned_resources"
 
 
 def test_tasks_are_registered():

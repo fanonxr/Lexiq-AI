@@ -27,6 +27,28 @@ This directory contains scripts and utilities for local development and operatio
 - `ngrok-setup.sh` - Set up Ngrok tunnel for local Twilio webhooks
 - `env-template.sh` - Generate .env files from templates
 
+### Deployment (Dev)
+
+- **`deploy-dev.sh`** - Backend: build Docker images, push to Azure Container Registry, update Azure Container Apps
+- **`deploy-frontend-dev.sh`** - Frontend: build Next.js (static export), deploy to Azure Static Web App
+
+Run from project root via Make:
+
+```bash
+# Backend (Container Apps)
+make deploy-build      # Build all backend images
+make deploy-push       # Push to ACR
+make deploy-update     # Update Container Apps
+make deploy-all        # Build, push, and update
+
+# Frontend (Static Web App)
+make deploy-frontend-build   # Build Next.js to apps/web-frontend/out
+make deploy-frontend-deploy  # Deploy to Azure Static Web App
+make deploy-frontend         # Build and deploy
+```
+
+Prerequisites: Azure CLI logged in (`az login`), ACR access for backend, Static Web App resource for frontend.
+
 ## Usage
 
 Scripts are designed to be run from the project root:

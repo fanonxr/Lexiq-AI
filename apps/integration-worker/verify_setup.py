@@ -108,7 +108,7 @@ def verify_celery_config():
     
     # Check Beat schedule
     beat_schedule = app.conf.beat_schedule
-    expected_tasks = ["sync-all-calendars", "refresh-expiring-tokens", "cleanup-sync-logs"]
+    expected_tasks = ["sync-all-calendars", "refresh-expiring-tokens", "cleanup-sync-logs", "cleanup-orphaned-resources"]
     
     for task_name in expected_tasks:
         if task_name not in beat_schedule:

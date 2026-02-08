@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,7 +59,7 @@ func main() {
 		// In production, you might want to make a lightweight health check call
 		return true, nil
 	}
-	
+
 	cartesiaCheck := func(ctx context.Context) (bool, error) {
 		// Simple check: try to create a client (validates config)
 		client := tts.NewCartesiaClient(cfg)
@@ -68,7 +69,7 @@ func main() {
 		// Note: We don't make an actual API call to avoid costs
 		return true, nil
 	}
-	
+
 	orchestratorCheck := func(ctx context.Context) (bool, error) {
 		client, err := orchestrator.NewOrchestratorClient(cfg)
 		if err != nil {
@@ -77,7 +78,7 @@ func main() {
 		defer client.Close()
 		return client.HealthCheck(ctx)
 	}
-	
+
 	mux.HandleFunc("/ready", observability.ReadinessHandler(deepgramCheck, cartesiaCheck, orchestratorCheck))
 
 	// Metrics endpoint (Prometheus)
@@ -97,10 +98,20 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
+		endpoint := fmt.Sprintf("ws://localhost:%s/streams/twilio", cfg.Port)
+		if cfg.VoiceGatewayURL != "" {
+			base := strings.TrimSuffix(cfg.VoiceGatewayURL, "/")
+			if strings.HasPrefix(base, "https://") {
+				base = "wss://" + base[8:]
+			} else if strings.HasPrefix(base, "http://") {
+				base = "ws://" + base[7:]
+			}
+			endpoint = base + "/streams/twilio"
+		}
 		logger.Info().
 			Str("port", cfg.Port).
-			Str("endpoint", fmt.Sprintf("ws://localhost:%s/streams/twilio", cfg.Port)).
-			Msg("Server listening")
+			Str("endpoint", endpoint).
+			Msg("Server listening, endpoint: " + endpoint)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal().Err(err).Msg("Server failed to start")
 		}
@@ -123,4 +134,3 @@ func main() {
 
 	logger.Info().Msg("Server exited gracefully")
 }
-
