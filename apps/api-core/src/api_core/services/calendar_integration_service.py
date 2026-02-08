@@ -246,6 +246,34 @@ class CalendarIntegrationService:
             return await self.refresh_access_token(integration)
         return integration.access_token
 
+    async def delete_outlook_webhook_subscription(
+        self, integration: CalendarIntegration
+    ) -> None:
+        """Delete Microsoft Graph webhook subscription. No-op if not Outlook or no subscription id."""
+        if integration.integration_type != "outlook" or not integration.webhook_subscription_id:
+            return
+        try:
+            access_token = await self.get_valid_access_token(integration)
+            url = f"{self.graph_api_url}/subscriptions/{integration.webhook_subscription_id}"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.delete(
+                    url,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                if response.status_code in (204, 404):
+                    logger.info(
+                        f"Deleted Outlook webhook subscription {integration.webhook_subscription_id} "
+                        f"(integration_id={integration.id})"
+                    )
+                else:
+                    logger.warning(
+                        f"Outlook webhook delete returned {response.status_code}: {response.text}"
+                    )
+        except Exception as e:
+            logger.warning(
+                f"Failed to delete Outlook webhook for integration {integration.id}: {e}. Continuing."
+            )
+
     async def sync_outlook_calendar(
         self,
         integration: CalendarIntegration,

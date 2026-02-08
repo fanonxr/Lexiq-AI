@@ -11,6 +11,7 @@ from api_core.database.session import get_session_context
 from api_core.exceptions import NotFoundError, ValidationError
 from api_core.models.user import UserListResponse, UserProfileUpdate, UserResponse
 from api_core.services.user_service import get_user_service
+from api_core.services.terminate_account_service import get_terminate_account_service
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,43 @@ async def update_current_user_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while updating user profile",
+        )
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def terminate_current_user_account(
+    current_user: TokenValidationResult = Depends(get_current_active_user),
+):
+    """
+    Permanently delete the current user's account (self-service).
+
+    Terminates all resources associated with the user (and, if the user is the
+    only member, their firm). Phase 1: validates the user exists and returns
+    without performing deletion. Later phases will delete DB, Blob, Qdrant,
+    Twilio, Stripe, Calendar, Redis, and integration resources.
+
+    Requires the user to be authenticated. Returns 204 No Content on success.
+    """
+    try:
+        async with get_session_context() as session:
+            terminate_service = get_terminate_account_service(session)
+            await terminate_service.terminate_account(current_user.user_id)
+            return None  # 204 No Content
+    except NotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error terminating account: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while terminating account",
         )
 
 

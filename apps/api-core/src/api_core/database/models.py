@@ -1080,3 +1080,60 @@ class ClientMemory(Base):
     def __repr__(self) -> str:
         preview = self.summary_text[:50] + "..." if len(self.summary_text) > 50 else self.summary_text
         return f"<ClientMemory(id={self.id}, client_id={self.client_id}, summary='{preview}')>"
+
+
+class PhoneNumberPool(Base):
+    """
+    Pool of Twilio phone numbers available for assignment to firms.
+
+    When an account is terminated, the firm's number is transferred back to the pool
+    (Twilio: moved to pool subaccount or main account). When a firm provisions a number,
+    we assign from the pool first (transfer to firm's subaccount), then buy new if empty.
+
+    Production best practice: Single source of truth for pool state; use FOR UPDATE SKIP LOCKED
+    when claiming a number to avoid race conditions.
+    """
+
+    __tablename__ = "phone_number_pool"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+
+    # Twilio identifiers
+    phone_number: Mapped[str] = mapped_column(
+        String(20), nullable=False, unique=True, index=True
+    )  # E.164
+    twilio_phone_number_sid: Mapped[str] = mapped_column(
+        String(100), nullable=False, unique=True, index=True
+    )
+    pool_account_sid: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True
+    )  # Main or pool subaccount SID where the number currently lives in Twilio
+
+    # Pool state
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="available", index=True
+    )  # available | assigned
+    firm_id: Mapped[Optional[str]] = mapped_column(
+        String(36), nullable=True, index=True
+    )  # Set when assigned
+    assigned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<PhoneNumberPool(id={self.id}, phone_number={self.phone_number}, status={self.status})>"

@@ -76,6 +76,11 @@ app.conf.beat_schedule = {
         "task": "integration_worker.tasks.trial_monitoring.check_all_trials",
         "schedule": crontab(minute="*/15"),  # Every 15 minutes
     },
+    # Clean up orphaned resources (Twilio subaccounts, pool numbers) every 30 minutes
+    "cleanup-orphaned-resources": {
+        "task": "integration_worker.tasks.cleanup.cleanup_orphaned_resources",
+        "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
 }
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ voice-gateway-vendor: ## Vendor voice-gateway dependencies
 	@echo "Vendoring Voice Gateway dependencies..."
 	cd apps/voice-gateway && go mod vendor
 
-.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-voice-gateway docker-build-no-cache install test   api-core-test api-core-test-cov cognitive-orch-test document-ingestion-test integration-worker-test voice-gateway-test voice-gateway-test-cov format lint terraform-init terraform-plan terraform-apply terraform-destroy terraform-validate terraform-fmt terraform-import-discover terraform-import-discover-staging terraform-import-discover-prod terraform-import terraform-import-staging terraform-import-prod terraform-sync frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp db-reset db-reset-local orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check voice-deps voice-build voice-run voice-test voice-test-cov voice-fmt voice-vet voice-lint voice-check voice-clean voice-health proto-compile proto-compile-go proto-clean-go generate-api-key generate-api-key-long generate-api-key-env generate-api-key-docker
+.PHONY: help docker-up docker-down docker-logs docker-clean docker-build docker-build-api-core docker-build-cognitive-orch docker-build-document-ingestion docker-build-voice-gateway docker-build-no-cache install test   api-core-test api-core-test-cov cognitive-orch-test document-ingestion-test integration-worker-test voice-gateway-test voice-gateway-test-cov format lint terraform-init terraform-plan terraform-apply terraform-destroy terraform-validate terraform-fmt terraform-import-discover terraform-import-discover-staging terraform-import-discover-prod terraform-import terraform-import-staging terraform-import-prod terraform-sync frontend-dev frontend-build frontend-start frontend-install migrate-init migrate-create migrate-up migrate-up-local migrate-up-azure migrate-down migrate-current migrate-history migrate-stamp db-reset db-reset-local orch-venv-setup orch-venv-install orch-dev orch-test orch-format orch-lint orch-type-check ingestion-venv-setup ingestion-venv-install ingestion-dev ingestion-test ingestion-format ingestion-lint ingestion-type-check voice-deps voice-build voice-run voice-test voice-test-cov voice-fmt voice-vet voice-lint voice-check voice-clean voice-health proto-compile proto-compile-go proto-clean-go generate-api-key generate-api-key-long generate-api-key-env generate-api-key-docker deploy-build deploy-build-service deploy-push deploy-push-service deploy-update deploy-update-service deploy-all deploy-service deploy-status deploy-frontend-build deploy-frontend-deploy deploy-frontend deploy-frontend-status
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -1241,6 +1241,14 @@ voice-health: ## Check voice-gateway service health
 	@echo "Checking Voice Gateway service health..."
 	@curl -s http://localhost:8080/health | python3 -m json.tool || echo "Service not running or not accessible"
 
+voice-dev-help: ## Print ngrok setup for local AI receptionist (voice) testing
+	@chmod +x tools/scripts/ngrok-voice-dev.sh
+	@tools/scripts/ngrok-voice-dev.sh
+
+voice-ngrok: ## Start ngrok with api-core + voice-gateway tunnels for local voice testing
+	@if [ ! -f tools/ngrok-voice.yml ]; then cp tools/ngrok-voice.yml.example tools/ngrok-voice.yml && echo "Created tools/ngrok-voice.yml from example"; fi
+	ngrok start api-core voice-gateway --config=tools/ngrok-voice.yml
+
 # Protocol Buffer compilation
 proto-compile: ## Compile Protocol Buffer definitions to Python stubs (compatible with protobuf 5.x)
 	@echo "Compiling Protocol Buffers with protobuf 5.x compatibility..."
@@ -1295,3 +1303,90 @@ clean: ## Clean build artifacts and temporary files
 postgres-start:
 	@echo "Starting PostgreSQL..."
 	/opt/homebrew/opt/postgresql@14/bin/postgres -D /opt/homebrew/var/postgresql@14
+
+# ============================================================================
+# Azure Container Apps Deployment (Dev Environment)
+# ============================================================================
+# These commands build, push, and deploy Docker images to Azure Container Apps
+# Prerequisites: Azure CLI logged in (az login), ACR access
+
+deploy-build: ## Build all Docker images for deployment
+	@chmod +x tools/scripts/deploy-dev.sh
+	@tools/scripts/deploy-dev.sh build
+
+deploy-build-service: ## Build a specific service (usage: make deploy-build-service SERVICE=api-core)
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "Error: SERVICE is required"; \
+		echo "Usage: make deploy-build-service SERVICE=<service-name>"; \
+		echo "Services: api-core, cognitive-orch, voice-gateway, document-ingestion, integration-worker"; \
+		exit 1; \
+	fi
+	@chmod +x tools/scripts/deploy-dev.sh
+	@tools/scripts/deploy-dev.sh build $(SERVICE)
+
+deploy-push: ## Push all Docker images to Azure Container Registry
+	@chmod +x tools/scripts/deploy-dev.sh
+	@tools/scripts/deploy-dev.sh push
+
+deploy-push-service: ## Push a specific service (usage: make deploy-push-service SERVICE=api-core)
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "Error: SERVICE is required"; \
+		echo "Usage: make deploy-push-service SERVICE=<service-name>"; \
+		echo "Services: api-core, cognitive-orch, voice-gateway, document-ingestion, integration-worker"; \
+		exit 1; \
+	fi
+	@chmod +x tools/scripts/deploy-dev.sh
+	@tools/scripts/deploy-dev.sh push $(SERVICE)
+
+deploy-update: ## Update Azure Container Apps with new images
+	@chmod +x tools/scripts/deploy-dev.sh
+	@tools/scripts/deploy-dev.sh deploy
+
+deploy-update-service: ## Update a specific Container App (usage: make deploy-update-service SERVICE=api-core)
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "Error: SERVICE is required"; \
+		echo "Usage: make deploy-update-service SERVICE=<service-name>"; \
+		echo "Services: api-core, cognitive-orch, voice-gateway, document-ingestion, integration-worker"; \
+		exit 1; \
+	fi
+	@chmod +x tools/scripts/deploy-dev.sh
+	@tools/scripts/deploy-dev.sh deploy $(SERVICE)
+
+deploy-all: ## Full deployment: build, push, and update all services
+	@chmod +x tools/scripts/deploy-dev.sh
+	@tools/scripts/deploy-dev.sh all
+
+deploy-service: ## Full deployment for a specific service (usage: make deploy-service SERVICE=api-core)
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "Error: SERVICE is required"; \
+		echo "Usage: make deploy-service SERVICE=<service-name>"; \
+		echo "Services: api-core, cognitive-orch, voice-gateway, document-ingestion, integration-worker"; \
+		exit 1; \
+	fi
+	@chmod +x tools/scripts/deploy-dev.sh
+	@tools/scripts/deploy-dev.sh all $(SERVICE)
+
+deploy-status: ## Check deployment status of all Container Apps
+	@chmod +x tools/scripts/deploy-dev.sh
+	@tools/scripts/deploy-dev.sh status
+
+# ============================================================================
+# Frontend Deployment (Azure Static Web Apps - Dev)
+# ============================================================================
+# Next.js is built with static export and deployed to Azure Static Web App
+
+deploy-frontend-build: ## Build Next.js frontend (static export to apps/web-frontend/out)
+	@chmod +x tools/scripts/deploy-frontend-dev.sh
+	@tools/scripts/deploy-frontend-dev.sh build
+
+deploy-frontend-deploy: ## Deploy built frontend to Azure Static Web App
+	@chmod +x tools/scripts/deploy-frontend-dev.sh
+	@tools/scripts/deploy-frontend-dev.sh deploy
+
+deploy-frontend: ## Build and deploy frontend to Azure Static Web App
+	@chmod +x tools/scripts/deploy-frontend-dev.sh
+	@tools/scripts/deploy-frontend-dev.sh all
+
+deploy-frontend-status: ## Show frontend (Static Web App) URL
+	@chmod +x tools/scripts/deploy-frontend-dev.sh
+	@tools/scripts/deploy-frontend-dev.sh status

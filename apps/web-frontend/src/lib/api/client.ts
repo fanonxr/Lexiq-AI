@@ -376,13 +376,17 @@ export async function apiRequest<T = unknown>(
       ok: response.ok,
     });
 
-    // Parse response
+    // Parse response (204 No Content has no body; parsing would throw)
     let data: any;
-    const contentType = response.headers.get("content-type");
-    if (contentType && contentType.includes("application/json")) {
-      data = await response.json();
+    if (response.status === 204) {
+      data = undefined;
     } else {
-      data = await response.text();
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        data = await response.text();
+      }
     }
 
     // Handle error responses

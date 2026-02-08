@@ -8,7 +8,6 @@ import { Alert } from "@/components/ui/Alert";
 import { Trash2, Save, Key, User, AlertTriangle } from "lucide-react";
 import { fetchUserProfile, updateUserProfile, terminateAccount } from "@/lib/api/users";
 import { useAuthContext } from "@/contexts/AuthContext";
-import { useRouter } from "next/navigation";
 import { FirmPhoneNumberSettings } from "@/components/settings/FirmPhoneNumberSettings";
 import { ThemeToggle } from "@/components/settings/ThemeToggle";
 import { logger } from "@/lib/logger";
@@ -21,7 +20,6 @@ import { logger } from "@/lib/logger";
  */
 export default function SettingsPage() {
   const { logout } = useAuthContext();
-  const router = useRouter();
 
   // Profile state
   const [name, setName] = useState("");
@@ -136,7 +134,8 @@ export default function SettingsPage() {
   }, [currentPassword, newPassword, confirmPassword]);
 
   /**
-   * Handle account termination
+   * Handle account termination.
+   * Only signs out and redirects after the backend confirms success (204).
    */
   const handleTerminateAccount = useCallback(async () => {
     if (terminateConfirmText !== "DELETE") {
@@ -147,12 +146,11 @@ export default function SettingsPage() {
     try {
       setIsTerminating(true);
       setTerminateError(null);
-      
+
       await terminateAccount();
-      
-      // Logout and redirect to home
+
+      // Backend returned 204 — account is terminated. Sign out and go home.
       await logout();
-      router.push("/");
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to terminate account";
       setTerminateError(errorMessage);
@@ -162,7 +160,7 @@ export default function SettingsPage() {
       setShowTerminateConfirm(false);
       setTerminateConfirmText("");
     }
-  }, [terminateConfirmText, logout, router]);
+  }, [terminateConfirmText, logout]);
 
   return (
     <div className="space-y-6">

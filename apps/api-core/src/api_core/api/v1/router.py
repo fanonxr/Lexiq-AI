@@ -40,6 +40,7 @@ from api_core.api.v1 import (
     conversations,
     dashboard,
     firms,
+    jobs,
     knowledge,
     leads,
     notifications,
@@ -75,6 +76,7 @@ router.include_router(firms.router)
 router.include_router(conversations.router)
 router.include_router(calls.router)
 router.include_router(twilio.router)
+router.include_router(jobs.router)
 
 
 @router.get(
