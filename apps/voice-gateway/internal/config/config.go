@@ -13,6 +13,11 @@ type Config struct {
 	// Server configuration
 	Port string `envconfig:"PORT" default:"8080"`
 
+	// Public base URL for this service (e.g. https://xxx.ngrok-free.dev when behind ngrok).
+	// Used for logging the WebSocket endpoint; Twilio connects to wss://<this-host>/streams/twilio.
+	// Optional; if unset, logs ws://localhost:PORT/streams/twilio.
+	VoiceGatewayURL string `envconfig:"VOICE_GATEWAY_URL" default:""`
+
 	// Deepgram STT API configuration
 	DeepgramAPIKey   string `envconfig:"DEEPGRAM_API_KEY" required:"true"`
 	DeepgramModel    string `envconfig:"DEEPGRAM_MODEL" default:"nova-2"` // nova-2, enhanced, base

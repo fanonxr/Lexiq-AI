@@ -279,6 +279,30 @@ class TwilioService:
                 details={"error": str(e), "status_code": e.status, "code": e.code},
             ) from e
 
+    async def close_subaccount(self, subaccount_sid: str) -> None:
+        """
+        Permanently close a Twilio subaccount (status=closed).
+
+        Use main-account credentials. Call after moving any phone numbers
+        to the pool (e.g. on account termination). Logs and swallows errors.
+        """
+        if not self.client:
+            return
+        try:
+            self.client.api.accounts(subaccount_sid).update(status="closed")
+            logger.info(f"Closed Twilio subaccount {subaccount_sid}")
+        except TwilioRestException as e:
+            if e.status == 404:
+                logger.debug(f"Twilio subaccount {subaccount_sid} already gone or not found")
+                return
+            logger.warning(
+                f"Failed to close Twilio subaccount {subaccount_sid}: {e}. Continuing."
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to close Twilio subaccount {subaccount_sid}: {e}. Continuing."
+            )
+
     async def provision_phone_number(
         self,
         area_code: Optional[str] = None,
@@ -515,6 +539,64 @@ class TwilioService:
             logger.error(f"Error listing Twilio numbers: {e}")
             raise ExternalServiceError(
                 message="Failed to list phone numbers",
+                service="Twilio",
+                details={"error": str(e), "status_code": e.status, "code": e.code},
+            ) from e
+
+    async def transfer_phone_number_to_account(
+        self,
+        phone_number_sid: str,
+        source_account_sid: str,
+        target_account_sid: str,
+    ) -> TwilioPhoneNumber:
+        """
+        Transfer a phone number from one Twilio account (subaccount) to another.
+
+        Uses the main account's credentials; the number is moved from source to target.
+        Used for the number pool: return number to pool (target=pool/main) or assign
+        from pool to firm (source=pool/main, target=firm subaccount).
+
+        Args:
+            phone_number_sid: Twilio Phone Number SID (e.g., PN...)
+            source_account_sid: Account SID where the number currently lives
+            target_account_sid: Account SID to move the number to (pool or firm subaccount)
+
+        Returns:
+            TwilioPhoneNumber with updated details
+
+        Raises:
+            ValueError: If Twilio client not configured
+            NotFoundError: If phone number not found
+            ExternalServiceError: If Twilio API fails
+        """
+        if not self.client:
+            raise ValueError("Twilio client not configured.")
+
+        try:
+            # Use main account client; target the source account's IncomingPhoneNumbers resource
+            # and update AccountSid to move the number to target account
+            number_resource = self.client.api.accounts(source_account_sid).incoming_phone_numbers(
+                phone_number_sid
+            )
+            number = number_resource.update(account_sid=target_account_sid)
+
+            logger.info(
+                f"Transferred phone number {phone_number_sid} from {source_account_sid} to {target_account_sid}"
+            )
+            return TwilioPhoneNumber(
+                sid=number.sid,
+                phone_number=number.phone_number,
+                status=number.status or "active",
+            )
+        except TwilioRestException as e:
+            if e.status == 404:
+                raise NotFoundError(
+                    resource="TwilioPhoneNumber",
+                    resource_id=phone_number_sid,
+                )
+            logger.error(f"Twilio API error transferring phone number: {e}")
+            raise ExternalServiceError(
+                message="Failed to transfer phone number",
                 service="Twilio",
                 details={"error": str(e), "status_code": e.status, "code": e.code},
             ) from e

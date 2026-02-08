@@ -119,6 +119,9 @@ credentials/
 # docker
 docker-compose.override.yml
 
+# ngrok (local config may contain authtoken)
+tools/ngrok-voice.yml
+
 /docs/*
 
 # Python

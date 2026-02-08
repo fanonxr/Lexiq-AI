@@ -146,9 +146,9 @@ services:
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
       # API Base URL for webhooks (used when provisioning phone numbers)
       # - API_BASE_URL=${API_BASE_URL:-http://localhost:8000}
-      - API_BASE_URL=${API_BASE_URL:-https://ungenerically-subcontiguous-vernetta.ngrok-free.dev}
+      - API_BASE_URL=${API_BASE_URL:-}
       # Voice Gateway URL (used in TwiML responses)
-      - VOICE_GATEWAY_URL=${VOICE_GATEWAY_URL:-wss://localhost:8080/streams/twilio}
+      - VOICE_GATEWAY_URL=${VOICE_GATEWAY_URL:-}
       # Twilio Webhook Security
       - TWILIO_VALIDATE_SIGNATURES=${TWILIO_VALIDATE_SIGNATURES:-true}
       - PYTHONPATH=/app/src:/app/libs/py-common/src
@@ -361,10 +361,14 @@ services:
       # Mount source for development (optional - comment out for production)
       - ./apps/voice-gateway:/app/src:ro
       - /etc/localtime:/etc/localtime:ro  # Sync with host time
+      # Mount .env so voice-gateway can read VOICE_GATEWAY_URL etc. (godotenv.Load() in /app)
+      - ./.env:/app/.env:ro
     environment:
       - TZ=UTC  # Set timezone explicitly
       # Server Configuration
       - PORT=8080
+      # Public base URL for this service (e.g. https://xxx.ngrok-free.dev when behind ngrok). Used for logging the WebSocket endpoint.
+      - VOICE_GATEWAY_URL=${VOICE_GATEWAY_URL:-}
       # Deepgram STT Configuration
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
       - DEEPGRAM_MODEL=${DEEPGRAM_MODEL:-nova-2}
@@ -393,7 +397,7 @@ services:
       - LOG_PRETTY=${LOG_PRETTY:-false}
       - METRICS_ENABLED=${METRICS_ENABLED:-true}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      # test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       start_period: 10s

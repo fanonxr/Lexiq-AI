@@ -38,3 +38,10 @@ class CalendarIntegrationRepository(BaseRepository[CalendarIntegration]):
         )
         return list(result.scalars().all())
 
+    async def get_all_by_user(self, user_id: str) -> List[CalendarIntegration]:
+        """Get all integrations for a user (active or not). Used for account termination."""
+        result = await self.session.execute(
+            select(CalendarIntegration).where(CalendarIntegration.user_id == user_id)
+        )
+        return list(result.scalars().all())
+

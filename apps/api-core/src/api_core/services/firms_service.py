@@ -22,6 +22,7 @@ from api_core.models.firms import (
     FirmSettingsResponse,
 )
 from api_core.repositories.firms_repository import FirmsRepository
+from api_core.repositories.phone_number_pool_repository import PhoneNumberPoolRepository
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class FirmsService:
 
     def __init__(self, session: AsyncSession) -> None:
         self._repo = FirmsRepository(session)
+        self._pool_repo = PhoneNumberPoolRepository(session)
         self.session = session
 
     async def check_user_firm_access(self, user_id: str, firm_id: str) -> bool:
@@ -434,6 +436,50 @@ class FirmsService:
                         "Webhook will not be configured automatically. "
                         "Configure it manually in Twilio console or use a public URL (e.g., ngrok)."
                     )
+
+            # Try pool first (production best practice: assign from pool before buying new)
+            available_from_pool = await self._pool_repo.get_available_for_update(limit=1)
+            if available_from_pool:
+                pool_row = available_from_pool[0]
+                try:
+                    await twilio_service.transfer_phone_number_to_account(
+                        phone_number_sid=pool_row.twilio_phone_number_sid,
+                        source_account_sid=pool_row.pool_account_sid,
+                        target_account_sid=subaccount_sid,
+                    )
+                    firm = await self._repo.set_phone_number(
+                        firm_id,
+                        pool_row.phone_number,
+                        pool_row.twilio_phone_number_sid,
+                        subaccount_sid,
+                    )
+                    await self._pool_repo.mark_assigned(pool_row.id, firm_id)
+                    if webhook_url:
+                        try:
+                            await twilio_service.update_phone_number_webhook(
+                                phone_number_sid=pool_row.twilio_phone_number_sid,
+                                webhook_url=webhook_url,
+                                account_sid=subaccount_sid,
+                                auth_token=subaccount_auth_token,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"Could not configure webhook for pooled number: {e}"
+                            )
+                    logger.info(
+                        f"Assigned number {pool_row.phone_number} from pool to firm {firm_id}"
+                    )
+                    return FirmPhoneNumberResponse.from_phone_number(
+                        firm_id=firm.id,
+                        phone_number=firm.twilio_phone_number,
+                        twilio_phone_number_sid=firm.twilio_phone_number_sid,
+                        twilio_subaccount_sid=firm.twilio_subaccount_sid,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to assign from pool for firm {firm_id}: {e}. Falling back to purchase."
+                    )
+                    # Fall through to existing-numbers / purchase flow
 
             # Check if subaccount already has a phone number
             logger.info(
